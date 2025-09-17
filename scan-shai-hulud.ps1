@@ -141,6 +141,7 @@ if ($lockFiles.Count -eq 0) {
 # Collect per-lock results for reporting
 $byLock = @{}
 $anyAffected = $false
+$anyWarnings = $false
 
 function Write-Color([string]$text, [string]$color) {
   if ($NoColor) { Write-Host $text; return }
@@ -347,11 +348,14 @@ foreach ($lock in $lockFiles) {
         if (-not $byLock.ContainsKey($lock.FullName)) { $byLock[$lock.FullName] = @{} }
         foreach ($version in ($foundPackages[$pkg] | Sort-Object)) {
           $isAffected = $affected[$pkg].Contains($version)
+          $isWarning = -not $isAffected  # Package name matches but version is safe
           if ($isAffected) { $anyAffected = $true }
+          if ($isWarning) { $anyWarnings = $true }
           $entry = [pscustomobject]@{
             Package          = $pkg
             Version          = $version
             IsAffected       = $isAffected
+            IsWarning        = $isWarning
             AffectedVersions = @($affected[$pkg] | Sort-Object)
           }
           $byLock[$lock.FullName]["$pkg@$version"] = $entry
@@ -387,9 +391,9 @@ foreach ($lock in $lockFiles) {
   }
 }
 
-# Header: matches (red)
-if (-not $Quiet) { Write-Color "Matches for the affected shai-hulud packages" 'Red' }
-if ($locksWithMatches.Count -gt 0) {
+# Header: compromised packages found
+if (-not $Quiet -and $anyAffected) { Write-Color "Compromised packages found (name and version match)" 'Red' }
+if ($locksWithMatches.Count -gt 0 -and $anyAffected) {
   foreach ($lock in $lockFiles) {
     $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
     if ($locksWithMatches -contains $rel) {
@@ -399,31 +403,50 @@ if ($locksWithMatches.Count -gt 0) {
         Sort-Object Key |
         ForEach-Object {
           $entry = $_.Value
-          if ($OnlyAffected -and -not $entry.IsAffected) { return }
+          if (-not $entry.IsAffected) { return }  # Only show actually compromised packages here
           $affectedList = ($entry.AffectedVersions -join ', ')
-          $statusText = if ($entry.IsAffected) { 'AFFECTED' } else { 'safe' }
-          $line = ("   {0} resolved {1} ({2}; affected: {3})" -f $entry.Package, $entry.Version, $statusText, $affectedList)
-          if ($entry.IsAffected) { Write-Color $line 'Red' } else { Write-Host $line }
+          $line = ("   {0} resolved {1} (AFFECTED; compromised versions: {2})" -f $entry.Package, $entry.Version, $affectedList)
+          Write-Color $line 'Red'
         }
       }
     }
   }
 }
-else {
+# Only show "None" if there are no compromised packages AND no warnings
+if (-not $anyAffected -and -not $anyWarnings) {
   if (-not $Quiet) { Write-Color " - None" 'Red' }
 }
 
 if (-not $Quiet) { Write-Host "" }
 
-# Header: no matches
-if (-not $Quiet) {
-  Write-Host "No matches for the affected shai-hulud packages"
-  if ($locksWithoutMatches.Count -gt 0) {
-    $locksWithoutMatches | Sort-Object | ForEach-Object { Write-Host (" - {0}" -f $_) }
+# Header: warning packages (name matches but version is safe)
+if (-not $Quiet -and $anyWarnings) { Write-Color "⚠️  Warning: Packages with compromised versions available (current versions are safe)" 'Yellow' }
+if ($anyWarnings) {
+  foreach ($lock in $lockFiles) {
+    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
+    if ($byLock.ContainsKey($lock.FullName)) {
+      $warningEntries = $byLock[$lock.FullName].GetEnumerator() | Where-Object { $_.Value.IsWarning }
+      if ($warningEntries) {
+        Write-Color (" - {0}" -f $rel) 'Yellow'
+        $warningEntries |
+        Sort-Object Key |
+        ForEach-Object {
+          $entry = $_.Value
+          $affectedList = ($entry.AffectedVersions -join ', ')
+          $line = ("   {0} resolved {1} (safe; avoid versions: {2})" -f $entry.Package, $entry.Version, $affectedList)
+          Write-Color $line 'Yellow'
+        }
+      }
+    }
   }
-  else {
-    Write-Host " - None"
-  }
+}
+
+if (-not $Quiet) { Write-Host "" }
+
+# Header: no compromised packages (show for files that were scanned but had no issues)
+if (-not $Quiet -and $locksWithoutMatches.Count -gt 0) {
+  Write-Host "No compromised packages found (all versions are safe)"
+  $locksWithoutMatches | Sort-Object | ForEach-Object { Write-Host (" - {0}" -f $_) }
 }
 
 # Optional JSON output
@@ -432,6 +455,7 @@ if ($Json -or $JsonPath) {
     root        = (Resolve-Path -LiteralPath $RootDir)
     results     = @()
     anyAffected = $anyAffected
+    anyWarnings = $anyWarnings
   }
   foreach ($lock in $lockFiles) {
     $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
@@ -450,6 +474,26 @@ if ($Json -or $JsonPath) {
 $elapsed = (Get-Date) - $startTime
 $totalLocks = $lockFiles.Count
 $totalMatches = ($byLock.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
-Write-Host ("Scanned {0} lockfiles; {1} matched entries; affected installs: {2}; elapsed: {3}" -f $totalLocks, ($totalMatches | ForEach-Object { if ($_) { $_ } else { 0 } }), ($anyAffected), $elapsed.ToString())
+$totalWarnings = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsWarning } | Measure-Object).Count } | Measure-Object -Sum).Sum
+
+Write-Host ""
+Write-Host "📊 Scan Summary:" -ForegroundColor Cyan
+Write-Host "   Lockfiles scanned: $totalLocks" -ForegroundColor White
+Write-Host "   Package entries checked: $($totalMatches | ForEach-Object { if ($_) { $_ } else { 0 } })" -ForegroundColor White
+Write-Host "   Compromised packages: " -NoNewline -ForegroundColor White
+if ($anyAffected) {
+  Write-Host "❌ $anyAffected" -ForegroundColor Red
+}
+else {
+  Write-Host "✅ 0" -ForegroundColor Green
+}
+Write-Host "   Warning packages: " -NoNewline -ForegroundColor White
+if ($totalWarnings -gt 0) {
+  Write-Host "⚠️  $totalWarnings" -ForegroundColor Yellow
+}
+else {
+  Write-Host "✅ 0" -ForegroundColor Green
+}
+Write-Host "   Scan duration: $($elapsed.ToString())" -ForegroundColor Gray
 
 if ($anyAffected) { exit 2 } else { exit 0 }

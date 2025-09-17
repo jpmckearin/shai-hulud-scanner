@@ -67,8 +67,8 @@ runs:
         $defaultListUrl = 'https://raw.githubusercontent.com/jpmckearin/shai-hulud-scanner/main/exploited_packages.txt'
         $defaultListPath = 'exploited_packages.txt'
 
-        Write-Host "Downloading shai-hulud-scanner from $scannerUrl"
-        Invoke-WebRequest -Uri $scannerUrl -OutFile $scannerPath
+        Write-Host "Downloading shai-hulud-scanner..."
+        Invoke-WebRequest -Uri $scannerUrl -OutFile $scannerPath -UseBasicParsing | Out-Null
 
         # Verify the script was downloaded
         if (-not (Test-Path $scannerPath)) {
@@ -76,16 +76,14 @@ runs:
           exit 1
         }
 
-        Write-Host "Downloading default exploited packages list from $defaultListUrl"
-        Invoke-WebRequest -Uri $defaultListUrl -OutFile $defaultListPath
+        Write-Host "Downloading exploited packages list..."
+        Invoke-WebRequest -Uri $defaultListUrl -OutFile $defaultListPath -UseBasicParsing | Out-Null
 
         # Verify the list was downloaded
         if (-not (Test-Path $defaultListPath)) {
           Write-Error "Failed to download exploited packages list"
           exit 1
         }
-
-        Write-Host "Successfully downloaded shai-hulud-scanner and exploited packages list"
 
     - name: Validate inputs
       shell: pwsh
@@ -96,7 +94,6 @@ runs:
         # Use default list if no custom list provided
         if ([string]::IsNullOrEmpty($listPath)) {
           $listPath = 'exploited_packages.txt'
-          Write-Host "Using default exploited packages list: $listPath"
         }
 
         # Check if list file exists
@@ -112,7 +109,7 @@ runs:
           exit 1
         }
 
-        Write-Host "Input validation passed - using list file: $listPath"
+        # Input validation passed
 
     - name: Run shai-hulud-scanner
       id: scan
@@ -155,14 +152,7 @@ runs:
         if ($quiet) { $scriptArgs.Quiet = $true }
         if ($noColor) { $scriptArgs.NoColor = $true }
 
-        Write-Host "Running shai-hulud-scanner with parameters:"
-        $scriptArgs.GetEnumerator() | ForEach-Object { 
-          if ($_.Value -is [array]) {
-            Write-Host "  $($_.Key): $($_.Value -join ', ')"
-          } else {
-            Write-Host "  $($_.Key): $($_.Value)"
-          }
-        }
+        Write-Host "Running shai-hulud-scanner..."
 
         try {
           # Capture output using splatting
@@ -178,7 +168,11 @@ runs:
               $hasMatches = $json.anyAffected -eq $true
               $matchCount = if ($json.results) { ($json.results | Measure-Object).Count } else { 0 }
               
-              Write-Host "Scan completed - Found $matchCount compromised packages"
+              if ($matchCount -gt 0) {
+                Write-Host "⚠️ Found $matchCount compromised packages"
+              } else {
+                Write-Host "✅ No compromised packages found"
+              }
               
               # Set outputs
               Write-Output "has-matches=$hasMatches" >> $env:GITHUB_OUTPUT
@@ -203,9 +197,10 @@ runs:
             Write-Output "json-output=" >> $env:GITHUB_OUTPUT
           }
           
-          # Display the output
-          Write-Host "Scanner output:"
-          $output | ForEach-Object { Write-Host $_ }
+          # Display the output (only if not quiet)
+          if (-not $quiet) {
+            $output | ForEach-Object { Write-Host $_ }
+          }
           
         } catch {
           Write-Error "Failed to run shai-hulud-scanner: $($_.Exception.Message)"
