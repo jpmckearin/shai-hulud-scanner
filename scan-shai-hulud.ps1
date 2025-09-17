@@ -114,6 +114,12 @@ ForEach-Object {
   if ($_ -match '^\s*(?<name>@?[^@/\s]+(?:/[^@/\s]+)?)@(?<ver>[0-9]+\.[0-9]+\.[0-9]+)\s*$') {
     $name = $matches['name']
     $ver = $matches['ver']
+    
+    # Normalize scoped package names: ensure @ prefix for scoped packages
+    if ($name -match '^[^@/]+/') {
+      $name = '@' + $name
+    }
+    
     if (-not $affected.ContainsKey($name)) { $affected[$name] = New-Object System.Collections.Generic.HashSet[string] }
     $null = $affected[$name].Add($ver)
     $null = $affectedNames.Add($name)
