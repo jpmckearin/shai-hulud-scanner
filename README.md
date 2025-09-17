@@ -175,6 +175,7 @@ jobs:
 1. **Add the workflow** to `.github/workflows/security-scan.yml` (no additional setup required!)
 
 2. **Optional: Create a custom exploited packages list** if you want to add company-specific packages:
+
    ```bash
    # Create the file
    touch exploited_packages.txt

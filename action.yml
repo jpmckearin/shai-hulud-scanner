@@ -134,38 +134,41 @@ runs:
           $listPath = 'exploited_packages.txt'
         }
 
-        # Build command arguments
-        $args = @(
+        # Build command arguments - using the most compatible approach
+        $arguments = @(
           '-ListPath', $listPath,
-          '-RootDir', $rootDir
+          '-RootDir', $rootDir,
+          '-Json'
         )
 
         if ($managers) {
-          $args += '-Managers', ($managers -split ',' | ForEach-Object { $_.Trim() })
+          $managersList = $managers -split ',' | ForEach-Object { $_.Trim() }
+          $arguments += '-Managers'
+          $arguments += $managersList
         }
 
         if ($include) {
-          $args += '-Include', ($include -split ',' | ForEach-Object { $_.Trim() })
+          $includeList = $include -split ',' | ForEach-Object { $_.Trim() }
+          $arguments += '-Include'
+          $arguments += $includeList
         }
 
         if ($exclude) {
-          $args += '-Exclude', ($exclude -split ',' | ForEach-Object { $_.Trim() })
+          $excludeList = $exclude -split ',' | ForEach-Object { $_.Trim() }
+          $arguments += '-Exclude'
+          $arguments += $excludeList
         }
 
-        if ($onlyAffected) { $args += '-OnlyAffected' }
-        if ($summary) { $args += '-Summary' }
-        if ($quiet) { $args += '-Quiet' }
-        if ($noColor) { $args += '-NoColor' }
+        if ($onlyAffected) { $arguments += '-OnlyAffected' }
+        if ($summary) { $arguments += '-Summary' }
+        if ($quiet) { $arguments += '-Quiet' }
+        if ($noColor) { $arguments += '-NoColor' }
 
-        # Add JSON output for parsing results
-        $jsonOutput = @()
-        $args += '-Json'
-
-        Write-Host "Running shai-hulud-scanner with arguments: $($args -join ' ')"
+        Write-Host "Running shai-hulud-scanner with arguments: $($arguments -join ' ')"
 
         try {
           # Capture output
-          $output = & pwsh -File 'scan-shai-hulud.ps1' @args 2>&1
+          $output = & pwsh -File 'scan-shai-hulud.ps1' @arguments 2>&1
           $exitCode = $LASTEXITCODE
             
           # Extract JSON output (last line should be JSON)
