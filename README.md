@@ -100,10 +100,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Scan for compromised packages
-        uses: jpmckearin/shai-hulud-scanner@main
+        uses: jpmckearin/shai-hulud-scanner@main  # Pin to specific version for production
         with:
           fail-on-match: 'true'
 ```
+
+> **Note**: For production use, consider pinning to a specific version (e.g., `@v1.0.0`) instead of `@main` to ensure consistent behavior.
 
 ### Action Inputs
 
