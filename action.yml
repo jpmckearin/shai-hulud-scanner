@@ -150,11 +150,6 @@ runs:
           $scriptArgs.Include = $include -split ',' | ForEach-Object { $_.Trim() }
         }
 
-        # Only set Exclude if explicitly provided (avoid conflicts with script defaults)
-        if ($exclude -and $exclude.Trim() -and $exclude -ne "") {
-          $scriptArgs.Exclude = $exclude -split ',' | ForEach-Object { $_.Trim() }
-        }
-
         if ($onlyAffected) { $scriptArgs.OnlyAffected = $true }
         if ($summary) { $scriptArgs.Summary = $true }
         if ($quiet) { $scriptArgs.Quiet = $true }
