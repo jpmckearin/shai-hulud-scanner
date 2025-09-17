@@ -3,7 +3,7 @@
 Scans JavaScript/TypeScript lockfiles for known shai-hulud-affected packages.
 
 .DESCRIPTION
-Recursively scans under a root directory for lockfiles (yarn.lock, package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml),
+Recursively scans under a root directory for lockfiles (yarn.lock, package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml, bun.lock),
 compares resolved packages to a provided list of package@version entries, and reports matches. Output includes which installs
 are affected vs safe, with options for filtering, color/verbosity, JSON output, and CI-friendly exit codes.
 
@@ -22,7 +22,7 @@ Glob(s) to exclude, relative to RootDir. Defaults: **/node_modules/**, **/.pnpm-
 Exclude is applied first and cannot be overridden by Include.
 
 .PARAMETER Managers
-One or more of: yarn, npm, pnpm. Controls which lockfile types are scanned. Default: yarn, npm, pnpm.
+One or more of: yarn, npm, pnpm, bun. Controls which lockfile types are scanned. Default: yarn, npm, pnpm, bun.
 
 .PARAMETER Detailed
 Show per-package lines. This is the default behavior; specifying -Detailed is a no-op unless -Summary is also present.
@@ -57,8 +57,8 @@ pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -
 Shows only repositories/lockfiles that contain affected installs and hides per-package lines.
 
 .EXAMPLE
-pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -Managers yarn,pnpm -Json -JsonPath .\results.json
-Scans only yarn and pnpm lockfiles, prints JSON to stdout, and writes the same JSON to results.json.
+pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -Managers yarn,pnpm,bun -Json -JsonPath .\results.json
+Scans only yarn, pnpm, and bun lockfiles, prints JSON to stdout, and writes the same JSON to results.json.
 
 .EXAMPLE
 pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -Include 'apps/**','packages/**' -Exclude '**/dist/**','**/node_modules/**'
@@ -78,7 +78,7 @@ param(
   [string]$RootDir,
   [string[]]$Include = @(),
   [string[]]$Exclude = @('**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/build/**', '**/tmp/**', '**/.turbo/**'),
-  [string[]]$Managers = @('yarn', 'npm', 'pnpm'),  # any subset of: yarn, npm, pnpm
+  [string[]]$Managers = @('yarn', 'npm', 'pnpm', 'bun'),  # any subset of: yarn, npm, pnpm, bun
   [switch]$Detailed,   # default true unless -Summary
   [switch]$Summary,
   [switch]$OnlyAffected,
@@ -129,11 +129,12 @@ $allPatterns = @()
 if ($Managers -contains 'yarn') { $allPatterns += 'yarn.lock' }
 if ($Managers -contains 'npm') { $allPatterns += 'package-lock.json', 'npm-shrinkwrap.json' }
 if ($Managers -contains 'pnpm') { $allPatterns += 'pnpm-lock.yaml' }
-if ($allPatterns.Count -eq 0) { $allPatterns = @('yarn.lock', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml') }
+if ($Managers -contains 'bun') { $allPatterns += 'bun.lock', 'bun.lockb' }
+if ($allPatterns.Count -eq 0) { $allPatterns = @('yarn.lock', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb') }
 
 $lockFiles = Get-ChildItem -Path $RootDir -Recurse -File -ErrorAction SilentlyContinue -Include $allPatterns
 if ($lockFiles.Count -eq 0) {
-  Write-Output "No yarn.lock files found under: $RootDir"
+  Write-Output "No lockfiles found under: $RootDir"
   exit 0
 }
 
@@ -299,6 +300,42 @@ foreach ($lock in $lockFiles) {
           continue
         }
       }
+    }
+  }
+  elseif (($extName -eq 'bun.lock') -or ($extName -eq 'bun.lockb')) {
+    try {
+      if ($extName -eq 'bun.lock') {
+        # Text-based bun.lock file (JSONC format)
+        $content = Get-Content -LiteralPath $lock.FullName -Raw -ErrorAction Stop
+        $obj = $content | ConvertFrom-Json -ErrorAction Stop
+      }
+      else {
+        # Binary bun.lockb file - we can't parse this directly
+        # Skip binary lockfiles for now as they require special handling
+        continue
+      }
+      
+      if ($obj -and $obj.packages) {
+        foreach ($pkgName in $obj.packages.Keys) {
+          $pkgData = $obj.packages[$pkgName]
+          if ($pkgData -is [array] -and $pkgData.Count -ge 1) {
+            # Extract package name and version from the package key
+            # Format: "package@version" or "@scope/package@version"
+            if ($pkgName -match '^(.+?)@([0-9]+\.[0-9]+\.[0-9]+.*)$') {
+              $name = $matches[1]
+              $version = $matches[2]
+              
+              if ($name -and $version -and $affectedNames.Contains($name)) {
+                if (-not $foundPackages.ContainsKey($name)) { $foundPackages[$name] = New-Object System.Collections.Generic.HashSet[string] }
+                $null = $foundPackages[$name].Add($version)
+              }
+            }
+          }
+        }
+      }
+    }
+    catch {
+      Write-Color ("Warning: failed to parse Bun lockfile: {0}" -f $lock.FullName) 'Yellow'
     }
   }
 

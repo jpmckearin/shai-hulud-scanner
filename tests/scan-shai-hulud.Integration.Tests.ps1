@@ -36,6 +36,25 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
       '    resolution: {integrity: sha512-def}'
     ) -join [Environment]::NewLine
     Set-Content -LiteralPath (Join-Path $script:tmpRoot 'pnpm-lock.yaml') -Value $pnpm -Encoding UTF8
+
+    # Minimal bun.lock with one affected package
+    $bunLock = @(
+      '{',
+      '  "lockfileVersion": 0,',
+      '  "workspaces": {',
+      '    "": {',
+      '      "dependencies": {',
+      '        "@ahmedhfarag/ngx-perfect-scrollbar": "^20.0.0"',
+      '      }',
+      '    }',
+      '  },',
+      '  "packages": {',
+      '    "@ahmedhfarag/ngx-perfect-scrollbar@20.0.20": ["@ahmedhfarag/ngx-perfect-scrollbar@20.0.20", {}, "npm-@ahmedhfarag-ngx-perfect-scrollbar-20.0.20"],',
+      '    "left-pad@1.3.0": ["left-pad@1.3.0", {}, "npm-left-pad-1.3.0"]',
+      '  }',
+      '}'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $script:tmpRoot 'bun.lock') -Value $bunLock -Encoding UTF8
   }
 
   AfterAll {
@@ -55,7 +74,7 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     Test-Path -LiteralPath $jsonOut | Should -BeTrue
     $json = Get-Content -LiteralPath $jsonOut -Raw | ConvertFrom-Json
     $json.anyAffected | Should -BeTrue
-    ($json.results | Where-Object { $_.lockFile -like '*yarn.lock' -or $_.lockFile -like '*pnpm-lock.yaml' }).Count | Should -BeGreaterThan 0
+    ($json.results | Where-Object { $_.lockFile -like '*yarn.lock' -or $_.lockFile -like '*pnpm-lock.yaml' -or $_.lockFile -like '*bun.lock' }).Count | Should -BeGreaterThan 0
 
     $allPackages = @()
     foreach ($r in $json.results) { $allPackages += $r.packages }
@@ -70,5 +89,44 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     $exitCode = $LASTEXITCODE
     
     $exitCode | Should -Be 0
+  }
+
+  It 'correctly parses bun.lock files' {
+    $bunDir = Join-Path $script:tmpRoot 'bun-test'
+    New-Item -ItemType Directory -Path $bunDir | Out-Null
+    
+    # Create a bun.lock file with affected packages
+    $bunLock = @(
+      '{',
+      '  "lockfileVersion": 0,',
+      '  "workspaces": {',
+      '    "": {',
+      '      "dependencies": {',
+      '        "@ahmedhfarag/ngx-perfect-scrollbar": "^20.0.0"',
+      '      }',
+      '    }',
+      '  },',
+      '  "packages": {',
+      '    "@ahmedhfarag/ngx-perfect-scrollbar@20.0.20": ["@ahmedhfarag/ngx-perfect-scrollbar@20.0.20", {}, "npm-@ahmedhfarag-ngx-perfect-scrollbar-20.0.20"]',
+      '  }',
+      '}'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $bunDir 'bun.lock') -Value $bunLock -Encoding UTF8
+    
+    $jsonOut = Join-Path $bunDir 'results.json'
+    
+    & pwsh -NoProfile -File $scriptPath -ListPath $listPath -RootDir $bunDir -Managers bun -Json -JsonPath $jsonOut 2>&1 | Out-Null
+    $exitCode = $LASTEXITCODE
+    
+    $exitCode | Should -Be 2
+    Test-Path -LiteralPath $jsonOut | Should -BeTrue
+    
+    $json = Get-Content -LiteralPath $jsonOut -Raw | ConvertFrom-Json
+    $json.anyAffected | Should -BeTrue
+    ($json.results | Where-Object { $_.lockFile -like '*bun.lock' }).Count | Should -Be 1
+    
+    $bunResult = $json.results | Where-Object { $_.lockFile -like '*bun.lock' }
+    $bunResult.packages.Count | Should -BeGreaterThan 0
+    ($bunResult.packages | Where-Object { $_.Package -eq '@ahmedhfarag/ngx-perfect-scrollbar' -and $_.IsAffected }).Count | Should -Be 1
   }
 }
