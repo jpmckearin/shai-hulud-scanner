@@ -4,14 +4,22 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
   BeforeAll {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     $scriptPath = Join-Path $repoRoot 'scan-shai-hulud.ps1'
-    $listPath = Join-Path $repoRoot 'exploited_packages.txt'
+    
+    # Create temporary test exploited packages file
+    $script:tmpListPath = Join-Path ([System.IO.Path]::GetTempPath()) ("hulud_test_" + [guid]::NewGuid() + ".txt")
+    $testPackages = @(
+      '@ahmedhfarag/ngx-perfect-scrollbar@20.0.20',
+      '@ahmedhfarag/ngx-virtual-scroller@4.0.4',
+      'left-pad@1.3.0'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath $script:tmpListPath -Value $testPackages -Encoding UTF8
 
     # Debug: Verify paths exist
     if (-not (Test-Path $scriptPath)) {
       throw "Script not found: $scriptPath"
     }
-    if (-not (Test-Path $listPath)) {
-      throw "List file not found: $listPath"
+    if (-not (Test-Path $script:tmpListPath)) {
+      throw "Test list file not found: $script:tmpListPath"
     }
     
     $script:tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("hulud_it_" + [guid]::NewGuid())
@@ -61,12 +69,15 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     if (Test-Path -LiteralPath $script:tmpRoot) {
       Remove-Item -LiteralPath $script:tmpRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
+    if (Test-Path -LiteralPath $script:tmpListPath) {
+      Remove-Item -LiteralPath $script:tmpListPath -Force -ErrorAction SilentlyContinue
+    }
   }
 
   It 'returns exit code 2 when affected installs are found' {
     $jsonOut = Join-Path $script:tmpRoot 'results.json'
     
-    & pwsh -NoProfile -File $scriptPath -ListPath $listPath -RootDir $script:tmpRoot -Json -JsonPath $jsonOut 2>&1 | Out-Null
+    & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $script:tmpRoot -Json -JsonPath $jsonOut 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
     
     $exitCode | Should -Be 2
@@ -85,7 +96,7 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     $emptyDir = Join-Path $script:tmpRoot 'empty'
     New-Item -ItemType Directory -Path $emptyDir | Out-Null
     
-    & pwsh -NoProfile -File $scriptPath -ListPath $listPath -RootDir $emptyDir 2>&1 | Out-Null
+    & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $emptyDir 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
     
     $exitCode | Should -Be 0
@@ -99,13 +110,6 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     $bunLock = @(
       '{',
       '  "lockfileVersion": 0,',
-      '  "workspaces": {',
-      '    "": {',
-      '      "dependencies": {',
-      '        "@ahmedhfarag/ngx-perfect-scrollbar": "^20.0.0"',
-      '      }',
-      '    }',
-      '  },',
       '  "packages": {',
       '    "@ahmedhfarag/ngx-perfect-scrollbar@20.0.20": ["@ahmedhfarag/ngx-perfect-scrollbar@20.0.20", {}, "npm-@ahmedhfarag-ngx-perfect-scrollbar-20.0.20"]',
       '  }',
@@ -115,7 +119,7 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     
     $jsonOut = Join-Path $bunDir 'results.json'
     
-    & pwsh -NoProfile -File $scriptPath -ListPath $listPath -RootDir $bunDir -Managers bun -Json -JsonPath $jsonOut 2>&1 | Out-Null
+    & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $bunDir -Managers bun -Json -JsonPath $jsonOut 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
     
     $exitCode | Should -Be 2

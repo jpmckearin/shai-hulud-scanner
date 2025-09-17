@@ -316,8 +316,9 @@ foreach ($lock in $lockFiles) {
       }
       
       if ($obj -and $obj.packages) {
-        foreach ($pkgName in $obj.packages.Keys) {
-          $pkgData = $obj.packages[$pkgName]
+        foreach ($prop in $obj.packages.PSObject.Properties) {
+          $pkgName = $prop.Name
+          $pkgData = $prop.Value
           if ($pkgData -is [array] -and $pkgData.Count -ge 1) {
             # Extract package name and version from the package key
             # Format: "package@version" or "@scope/package@version"
