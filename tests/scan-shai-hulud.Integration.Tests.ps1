@@ -133,4 +133,42 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     $bunResult.packages.Count | Should -BeGreaterThan 0
     ($bunResult.packages | Where-Object { $_.Package -eq '@ahmedhfarag/ngx-perfect-scrollbar' -and $_.IsAffected }).Count | Should -Be 1
   }
+
+  It 'correctly identifies warning packages (name matches but version is safe)' {
+    $warningDir = Join-Path $script:tmpRoot 'warning-test'
+    New-Item -ItemType Directory -Path $warningDir | Out-Null
+    
+    # Create a yarn.lock with packages that have compromised versions available but are using safe versions
+    $yarnLock = @(
+      'left-pad@^2.0.0:',
+      '  version "2.0.0"',
+      '',
+      'lodash@^4.17.21:',
+      '  version "4.17.21"'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $warningDir 'yarn.lock') -Value $yarnLock -Encoding UTF8
+    
+    $jsonOut = Join-Path $warningDir 'results.json'
+    
+    & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $warningDir -Managers yarn -Json -JsonPath $jsonOut 2>&1 | Out-Null
+    $exitCode = $LASTEXITCODE
+    
+    # Should exit with 0 (no compromised packages, but warnings)
+    $exitCode | Should -Be 0
+    Test-Path -LiteralPath $jsonOut | Should -BeTrue
+    
+    $json = Get-Content -LiteralPath $jsonOut -Raw | ConvertFrom-Json
+    $json.anyAffected | Should -BeFalse
+    $json.anyWarnings | Should -BeTrue
+    
+    $yarnResult = $json.results | Where-Object { $_.lockFile -like '*yarn.lock' }
+    $yarnResult.packages.Count | Should -BeGreaterThan 0
+    
+    # Check that left-pad is identified as a warning (name matches but version is safe)
+    $leftPadPackage = $yarnResult.packages | Where-Object { $_.Package -eq 'left-pad' }
+    $leftPadPackage | Should -Not -BeNullOrEmpty
+    $leftPadPackage.IsAffected | Should -BeFalse
+    $leftPadPackage.IsWarning | Should -BeTrue
+    $leftPadPackage.Version | Should -Be '2.0.0'
+  }
 }
