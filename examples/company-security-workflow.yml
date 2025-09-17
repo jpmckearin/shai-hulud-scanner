@@ -1,0 +1,95 @@
+name: Security Scan - Shai-Hulud Scanner
+
+on:
+  push:
+    branches: [main, develop, master]
+  pull_request:
+    branches: [main, develop, master]
+  schedule:
+    # Run daily at 2 AM UTC to catch new vulnerabilities
+    - cron: "0 2 * * *"
+
+jobs:
+  security-scan:
+    name: Scan for Compromised Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history for comprehensive scanning
+
+      - name: Run Shai-Hulud Scanner
+        uses: jpmckearin/shai-hulud-scanner@main
+        with:
+          # Optional: Path to your custom exploited packages list file
+          # If not provided, uses the default list from the scanner repository
+          # list-path: "security/exploited_packages.txt"
+
+          # Root directory to scan (usually the repository root)
+          root-dir: "."
+
+          # Package managers to scan
+          managers: "yarn,npm,pnpm,bun"
+
+          # Optional: Include only specific directories
+          # include: 'apps/**,packages/**,src/**'
+
+          # Optional: Exclude specific directories
+          exclude: "**/node_modules/**,**/dist/**,**/build/**,**/.next/**,**/coverage/**"
+
+          # Fail the workflow if compromised packages are found
+          fail-on-match: "true"
+
+          # Show only affected packages for cleaner output
+          only-affected: "true"
+
+          # Use summary mode for cleaner CI output
+          summary: "false"
+
+          # Disable colors for better CI log readability
+          no-color: "true"
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: |
+            security-scan-results.json
+          retention-days: 30
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // This would be populated by the scanner action
+            const hasMatches = '${{ steps.scan.outputs.has-matches }}' === 'true';
+            const matchCount = '${{ steps.scan.outputs.match-count }}';
+
+            let comment = '## 🔒 Security Scan Results\n\n';
+
+            if (hasMatches) {
+              comment += `⚠️ **${matchCount} compromised packages detected!**\n\n`;
+              comment += 'This PR contains packages that are known to be compromised by the Shai-Hulud malware.\n';
+              comment += 'Please review the scan results and update the affected dependencies.\n\n';
+              comment += '**Next steps:**\n';
+              comment += '1. Review the detailed scan output above\n';
+              comment += '2. Update affected packages to safe versions\n';
+              comment += '3. Re-run this scan to verify fixes\n';
+            } else {
+              comment += '✅ **No compromised packages detected**\n\n';
+              comment += 'All scanned dependencies appear to be safe.';
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

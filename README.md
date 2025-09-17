@@ -82,3 +82,116 @@ For detailed help with all parameters and examples:
 ```powershell
 Get-Help -Full .\scan-shai-hulud.ps1
 ```
+
+## GitHub Action Usage
+
+This repository also provides a reusable GitHub Action that can be integrated into any repository to automatically scan for compromised packages.
+
+### Quick Start
+
+Add this to your repository's `.github/workflows/security-scan.yml`:
+
+```yaml
+name: Security Scan
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for compromised packages
+        uses: jpmckearin/shai-hulud-scanner@main
+        with:
+          fail-on-match: 'true'
+```
+
+### Action Inputs
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `list-path` | Path to exploited packages list file (optional - uses default if not provided) | No | Uses default list from scanner repository |
+| `root-dir` | Root directory to scan | No | `.` |
+| `managers` | Package managers to scan (comma-separated) | No | `yarn,npm,pnpm,bun` |
+| `include` | Glob patterns to include (comma-separated) | No | - |
+| `exclude` | Glob patterns to exclude (comma-separated) | No | - |
+| `fail-on-match` | Fail the action if compromised packages are found | No | `true` |
+| `only-affected` | Show only affected packages in output | No | `false` |
+| `summary` | Show only summary output | No | `false` |
+| `quiet` | Suppress non-essential output | No | `false` |
+| `no-color` | Disable colored output | No | `false` |
+
+### Action Outputs
+
+| Output | Description |
+|--------|-------------|
+| `has-matches` | Whether any compromised packages were found |
+| `match-count` | Number of compromised packages found |
+| `json-output` | JSON output of scan results |
+
+### Advanced Example
+
+```yaml
+name: Comprehensive Security Scan
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Run comprehensive security scan
+        uses: jpmckearin/shai-hulud-scanner@main
+        with:
+          # Optional: Use custom exploited packages list
+          # list-path: 'security/exploited_packages.txt'
+          root-dir: '.'
+          managers: 'yarn,npm,pnpm,bun'
+          include: 'apps/**,packages/**,src/**'
+          exclude: '**/node_modules/**,**/dist/**,**/build/**'
+          fail-on-match: 'true'
+          only-affected: 'true'
+          no-color: 'true'
+      
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-results
+          path: security-scan-results.json
+          retention-days: 30
+```
+
+### Setting Up for Your Company
+
+1. **Add the workflow** to `.github/workflows/security-scan.yml` (no additional setup required!)
+
+2. **Optional: Create a custom exploited packages list** if you want to add company-specific packages:
+   ```bash
+   # Create the file
+   touch exploited_packages.txt
+   
+   # Add compromised packages (one per line)
+   echo "@ahmedhfarag/ngx-perfect-scrollbar@20.0.20" >> exploited_packages.txt
+   echo "@ahmedhfarag/ngx-virtual-scroller@4.0.4" >> exploited_packages.txt
+   ```
+
+3. **Configure branch protection** in your repository settings to require the security scan to pass before merging
+
+4. **The action automatically uses the latest exploited packages list** from the scanner repository, so you get updates without any maintenance!
+
+### Actions Examples
+
+See the `examples/` directory for:
+
+- `company-security-workflow.yml` - Full-featured workflow with PR comments and artifacts
+- `basic-security-workflow.yml` - Minimal setup for quick integration
+- `exploited_packages_template.txt` - Template for your compromised packages list

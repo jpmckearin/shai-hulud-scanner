@@ -1,0 +1,215 @@
+name: "Shai-Hulud Scanner"
+description: "Scan lockfiles for compromised packages using shai-hulud-scanner"
+author: "jpmckearin"
+
+inputs:
+  list-path:
+    description: "Path to exploited packages list file (relative to repository root). If not provided, uses the default list from the scanner repository."
+    required: false
+    default: ""
+  root-dir:
+    description: "Root directory to scan (relative to repository root)"
+    required: false
+    default: "."
+  managers:
+    description: "Package managers to scan (comma-separated: yarn,npm,pnpm,bun)"
+    required: false
+    default: "yarn,npm,pnpm,bun"
+  include:
+    description: "Glob patterns to include (comma-separated)"
+    required: false
+  exclude:
+    description: "Glob patterns to exclude (comma-separated)"
+    required: false
+  fail-on-match:
+    description: "Fail the action if compromised packages are found"
+    required: false
+    default: "true"
+  only-affected:
+    description: "Show only affected packages in output"
+    required: false
+    default: "false"
+  summary:
+    description: "Show only summary output"
+    required: false
+    default: "false"
+  quiet:
+    description: "Suppress non-essential output"
+    required: false
+    default: "false"
+  no-color:
+    description: "Disable colored output"
+    required: false
+    default: "false"
+
+outputs:
+  has-matches:
+    description: "Whether any compromised packages were found"
+    value: ${{ steps.scan.outputs.has-matches }}
+  match-count:
+    description: "Number of compromised packages found"
+    value: ${{ steps.scan.outputs.match-count }}
+  json-output:
+    description: "JSON output of scan results"
+    value: ${{ steps.scan.outputs.json-output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download shai-hulud-scanner and exploited packages list
+      shell: pwsh
+      run: |
+        $scannerUrl = 'https://raw.githubusercontent.com/jpmckearin/shai-hulud-scanner/main/scan-shai-hulud.ps1'
+        $scannerPath = 'scan-shai-hulud.ps1'
+        $defaultListUrl = 'https://raw.githubusercontent.com/jpmckearin/shai-hulud-scanner/main/exploited_packages.txt'
+        $defaultListPath = 'exploited_packages.txt'
+
+        Write-Host "Downloading shai-hulud-scanner from $scannerUrl"
+        Invoke-WebRequest -Uri $scannerUrl -OutFile $scannerPath
+
+        # Verify the script was downloaded
+        if (-not (Test-Path $scannerPath)) {
+          Write-Error "Failed to download shai-hulud-scanner"
+          exit 1
+        }
+
+        Write-Host "Downloading default exploited packages list from $defaultListUrl"
+        Invoke-WebRequest -Uri $defaultListUrl -OutFile $defaultListPath
+
+        # Verify the list was downloaded
+        if (-not (Test-Path $defaultListPath)) {
+          Write-Error "Failed to download exploited packages list"
+          exit 1
+        }
+
+        Write-Host "Successfully downloaded shai-hulud-scanner and exploited packages list"
+
+    - name: Validate inputs
+      shell: pwsh
+      run: |
+        $listPath = '${{ inputs.list-path }}'
+        $rootDir = '${{ inputs.root-dir }}'
+
+        # Use default list if no custom list provided
+        if ([string]::IsNullOrEmpty($listPath)) {
+          $listPath = 'exploited_packages.txt'
+          Write-Host "Using default exploited packages list: $listPath"
+        }
+
+        # Check if list file exists
+        if (-not (Test-Path $listPath)) {
+          Write-Error "List file not found: $listPath"
+          Write-Host "Please ensure the exploited packages list file exists in your repository or use the default list"
+          exit 1
+        }
+
+        # Check if root directory exists
+        if (-not (Test-Path $rootDir)) {
+          Write-Error "Root directory not found: $rootDir"
+          exit 1
+        }
+
+        Write-Host "Input validation passed - using list file: $listPath"
+
+    - name: Run shai-hulud-scanner
+      id: scan
+      shell: pwsh
+      run: |
+        $listPath = '${{ inputs.list-path }}'
+        $rootDir = '${{ inputs.root-dir }}'
+        $managers = '${{ inputs.managers }}'
+        $include = '${{ inputs.include }}'
+        $exclude = '${{ inputs.exclude }}'
+        $onlyAffected = '${{ inputs.only-affected }}' -eq 'true'
+        $summary = '${{ inputs.summary }}' -eq 'true'
+        $quiet = '${{ inputs.quiet }}' -eq 'true'
+        $noColor = '${{ inputs.no-color }}' -eq 'true'
+        $failOnMatch = '${{ inputs.fail-on-match }}' -eq 'true'
+
+        # Use default list if no custom list provided
+        if ([string]::IsNullOrEmpty($listPath)) {
+          $listPath = 'exploited_packages.txt'
+        }
+
+        # Build command arguments
+        $args = @(
+          '-ListPath', $listPath,
+          '-RootDir', $rootDir
+        )
+
+        if ($managers) {
+          $args += '-Managers', ($managers -split ',' | ForEach-Object { $_.Trim() })
+        }
+
+        if ($include) {
+          $args += '-Include', ($include -split ',' | ForEach-Object { $_.Trim() })
+        }
+
+        if ($exclude) {
+          $args += '-Exclude', ($exclude -split ',' | ForEach-Object { $_.Trim() })
+        }
+
+        if ($onlyAffected) { $args += '-OnlyAffected' }
+        if ($summary) { $args += '-Summary' }
+        if ($quiet) { $args += '-Quiet' }
+        if ($noColor) { $args += '-NoColor' }
+
+        # Add JSON output for parsing results
+        $jsonOutput = @()
+        $args += '-Json'
+
+        Write-Host "Running shai-hulud-scanner with arguments: $($args -join ' ')"
+
+        try {
+          # Capture output
+          $output = & pwsh -File 'scan-shai-hulud.ps1' @args 2>&1
+          $exitCode = $LASTEXITCODE
+            
+          # Extract JSON output (last line should be JSON)
+          $jsonOutput = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+            
+          if ($jsonOutput) {
+            try {
+              $json = $jsonOutput | ConvertFrom-Json
+              $hasMatches = $json.anyAffected -eq $true
+              $matchCount = if ($json.results) { ($json.results | Measure-Object).Count } else { 0 }
+              
+              Write-Host "Scan completed - Found $matchCount compromised packages"
+              
+              # Set outputs
+              Write-Output "has-matches=$hasMatches" >> $env:GITHUB_OUTPUT
+              Write-Output "match-count=$matchCount" >> $env:GITHUB_OUTPUT
+              Write-Output "json-output=$jsonOutput" >> $env:GITHUB_OUTPUT
+              
+              # Fail if matches found and fail-on-match is true
+              if ($hasMatches -and $failOnMatch) {
+                Write-Error "Compromised packages detected! Check the output above for details."
+                exit 2
+              }
+            } catch {
+              Write-Warning "Failed to parse JSON output: $($_.Exception.Message)"
+              Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
+              Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+              Write-Output "json-output=" >> $env:GITHUB_OUTPUT
+            }
+          } else {
+            Write-Warning "No JSON output received from scanner"
+            Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
+            Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+            Write-Output "json-output=" >> $env:GITHUB_OUTPUT
+          }
+          
+          # Display the output
+          Write-Host "Scanner output:"
+          $output | ForEach-Object { Write-Host $_ }
+          
+        } catch {
+          Write-Error "Failed to run shai-hulud-scanner: $($_.Exception.Message)"
+          Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
+          Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+          Write-Output "json-output=" >> $env:GITHUB_OUTPUT
+          exit 1
+        }
