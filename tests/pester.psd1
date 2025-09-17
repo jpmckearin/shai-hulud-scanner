@@ -1,13 +1,13 @@
 @{
     Run        = @{
-        Path = @('.\\tests')
+        Path = @('./tests')
     }
     Output     = @{
         Verbosity = 'Normal'
     }
     TestResult = @{
         Enabled      = $true
-        OutputPath   = '.\\TestResults\\Pester-TestResults.xml'
+        OutputPath   = './TestResults/Pester-TestResults.xml'
         OutputFormat = 'NUnitXml'
     }
 }

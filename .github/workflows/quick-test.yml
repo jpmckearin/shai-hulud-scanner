@@ -1,0 +1,67 @@
+name: Quick Test
+
+on:
+  workflow_dispatch: # Manual trigger
+  push:
+    branches: [main]
+    paths:
+      - "scan-shai-hulud.ps1"
+      - "tests/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create TestResults directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path TestResults -Force
+
+      - name: Run Pester Tests
+        run: |
+          pwsh -Command "if (-not (Test-Path 'TestResults')) { New-Item -ItemType Directory -Path 'TestResults' -Force }"
+          pwsh -File tests/Run-Pester.ps1
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quick-test-results
+          path: TestResults/
+          retention-days: 7
+
+      - name: Publish Test Results Summary
+        if: always()
+        run: |
+          pwsh -Command '
+          try {
+            if (Test-Path "TestResults/Pester-TestResults.xml") {
+              # Parse the XML and create a summary
+              [xml]$xml = Get-Content "TestResults/Pester-TestResults.xml"
+              $total = $xml."test-results".total
+              $passed = $xml."test-results".total - $xml."test-results".failures
+              $failed = $xml."test-results".failures
+              
+              Write-Host "## Quick Test Results Summary" >> $env:GITHUB_STEP_SUMMARY
+              Write-Host "📊 **Total Tests:** $total" >> $env:GITHUB_STEP_SUMMARY
+              Write-Host "✅ **Passed:** $passed" >> $env:GITHUB_STEP_SUMMARY
+              Write-Host "❌ **Failed:** $failed" >> $env:GITHUB_STEP_SUMMARY
+              
+              if ($failed -eq 0) {
+                Write-Host "🎉 **All tests passed!**" >> $env:GITHUB_STEP_SUMMARY
+              } else {
+                Write-Host "⚠️ **Some tests failed. Check the logs for details.**" >> $env:GITHUB_STEP_SUMMARY
+              }
+            } else {
+              Write-Host "## Quick Test Results Summary" >> $env:GITHUB_STEP_SUMMARY
+              Write-Host "❌ **No test results found**" >> $env:GITHUB_STEP_SUMMARY
+            }
+          } catch {
+            Write-Host "## Quick Test Results Summary" >> $env:GITHUB_STEP_SUMMARY
+            Write-Host "❌ **Error parsing test results:** $($_.Exception.Message)" >> $env:GITHUB_STEP_SUMMARY
+          }
+          '

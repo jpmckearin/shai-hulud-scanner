@@ -1,10 +1,13 @@
 # Shai-Hulud Scanner
 
+[![Test](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test.yml/badge.svg)](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test.yml)
+[![Test Matrix](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml/badge.svg)](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml)
+
 A PowerShell script that scans JavaScript/TypeScript lockfiles for known shai-hulud-affected packages.
 
 ## Description
 
-Recursively scans under a root directory for lockfiles (yarn.lock, package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml), compares resolved packages to a provided list of package@version entries, and reports matches. Output includes which installs are affected vs safe, with options for filtering, color/verbosity, JSON output, and CI-friendly exit codes.
+Recursively scans under a root directory for lockfiles (yarn.lock, package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml, bun.lock), compares resolved packages to a provided list of package@version entries, and reports matches. Output includes which installs are affected vs safe, with options for filtering, color/verbosity, JSON output, and CI-friendly exit codes.
 
 ## Usage
 
