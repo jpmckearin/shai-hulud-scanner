@@ -134,41 +134,44 @@ runs:
           $listPath = 'exploited_packages.txt'
         }
 
-        # Build command arguments - using the most compatible approach
-        $arguments = @(
-          '-ListPath', $listPath,
-          '-RootDir', $rootDir,
-          '-Json'
-        )
-
-        if ($managers) {
-          $managersList = $managers -split ',' | ForEach-Object { $_.Trim() }
-          $arguments += '-Managers'
-          $arguments += $managersList
+        # Build command arguments using splatting - the correct approach
+        $scriptArgs = @{
+          ListPath = $listPath
+          RootDir = $rootDir
+          Json = $true
         }
 
-        if ($include) {
-          $includeList = $include -split ',' | ForEach-Object { $_.Trim() }
-          $arguments += '-Include'
-          $arguments += $includeList
+        # Only set Managers if different from default
+        if ($managers -and $managers.Trim() -and $managers -ne "yarn,npm,pnpm,bun") {
+          $scriptArgs.Managers = $managers -split ',' | ForEach-Object { $_.Trim() }
         }
 
-        if ($exclude) {
-          $excludeList = $exclude -split ',' | ForEach-Object { $_.Trim() }
-          $arguments += '-Exclude'
-          $arguments += $excludeList
+        if ($include -and $include.Trim()) {
+          $scriptArgs.Include = $include -split ',' | ForEach-Object { $_.Trim() }
         }
 
-        if ($onlyAffected) { $arguments += '-OnlyAffected' }
-        if ($summary) { $arguments += '-Summary' }
-        if ($quiet) { $arguments += '-Quiet' }
-        if ($noColor) { $arguments += '-NoColor' }
+        # Only set Exclude if explicitly provided (avoid conflicts with script defaults)
+        if ($exclude -and $exclude.Trim() -and $exclude -ne "") {
+          $scriptArgs.Exclude = $exclude -split ',' | ForEach-Object { $_.Trim() }
+        }
 
-        Write-Host "Running shai-hulud-scanner with arguments: $($arguments -join ' ')"
+        if ($onlyAffected) { $scriptArgs.OnlyAffected = $true }
+        if ($summary) { $scriptArgs.Summary = $true }
+        if ($quiet) { $scriptArgs.Quiet = $true }
+        if ($noColor) { $scriptArgs.NoColor = $true }
+
+        Write-Host "Running shai-hulud-scanner with parameters:"
+        $scriptArgs.GetEnumerator() | ForEach-Object { 
+          if ($_.Value -is [array]) {
+            Write-Host "  $($_.Key): $($_.Value -join ', ')"
+          } else {
+            Write-Host "  $($_.Key): $($_.Value)"
+          }
+        }
 
         try {
-          # Capture output
-          $output = & pwsh -File 'scan-shai-hulud.ps1' @arguments 2>&1
+          # Capture output using splatting
+          $output = & pwsh -File 'scan-shai-hulud.ps1' @scriptArgs 2>&1
           $exitCode = $LASTEXITCODE
             
           # Extract JSON output (last line should be JSON)
