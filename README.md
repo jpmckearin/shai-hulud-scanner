@@ -1,7 +1,8 @@
 # Shai-Hulud Scanner
 
-[![Test](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test.yml/badge.svg)](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test.yml)
-[![Test Matrix](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml/badge.svg)](https://github.com/jmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml)
+[![Test](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/test.yml/badge.svg)](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/test.yml)
+[![Test Matrix](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml/badge.svg)](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/test-matrix.yml)
+[![Quick Test](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/quick-test.yml/badge.svg)](https://github.com/jpmckearin/shai-hulud-scanner/actions/workflows/quick-test.yml)
 
 A PowerShell script that scans JavaScript/TypeScript lockfiles for known shai-hulud-affected packages.
 
