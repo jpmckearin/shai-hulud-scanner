@@ -153,7 +153,7 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $warningDir -Managers yarn -Json -JsonPath $jsonOut 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
     
-    # Should exit with 0 (no compromised packages, but warnings)
+    # Should exit with 0 (no compromised packages, warnings don't affect exit code)
     $exitCode | Should -Be 0
     Test-Path -LiteralPath $jsonOut | Should -BeTrue
     
@@ -170,5 +170,32 @@ Describe 'scan-shai-hulud.ps1 integration' -Tag 'Integration' {
     $leftPadPackage.IsAffected | Should -BeFalse
     $leftPadPackage.IsWarning | Should -BeTrue
     $leftPadPackage.Version | Should -Be '2.0.0'
+  }
+
+  It 'correctly handles JSON output parsing' {
+    # Test that the scanner produces valid JSON
+    $testDir = Join-Path $script:tmpRoot 'json-test'
+    New-Item -ItemType Directory -Path $testDir | Out-Null
+    
+    $yarnLock = @(
+      'left-pad@^1.3.0:',
+      '  version "1.3.0"'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $testDir 'yarn.lock') -Value $yarnLock -Encoding UTF8
+    
+    $jsonOut = Join-Path $testDir 'results.json'
+    & pwsh -NoProfile -File $scriptPath -ListPath $script:tmpListPath -RootDir $testDir -Json -JsonPath $jsonOut 2>&1 | Out-Null
+    $exitCode = $LASTEXITCODE
+    
+    # Should exit with 2 (compromised packages found)
+    $exitCode | Should -Be 2
+    
+    # JSON should be valid
+    $json = Get-Content -LiteralPath $jsonOut -Raw | ConvertFrom-Json
+    $json | Should -Not -BeNullOrEmpty
+    $json.anyAffected | Should -BeTrue
+    $json.anyWarnings | Should -BeFalse
+    $json.summary | Should -Not -BeNullOrEmpty
+    $json.results | Should -Not -BeNullOrEmpty
   }
 }
