@@ -66,19 +66,22 @@ Scans only under apps/ and packages/ while still honoring exclusions.
 
 .NOTES
 Exit codes:
- - 0: success; no affected installs found (or no lockfiles found)
+ - 0: success; no compromised packages found (or no lockfiles found)
  - 1: invalid input (e.g., ListPath or RootDir not found; or list file empty/invalid)
- - 2: success; at least one affected install found (useful for CI gating)
+ - 2: success; at least one compromised package found (useful for CI gating)
 #>
 
 param(
   [Parameter(Mandatory = $true)]
+  [ValidateScript({ Test-Path $_ -PathType Leaf })]
   [string]$ListPath,
   [Parameter(Mandatory = $true)]
+  [ValidateScript({ Test-Path $_ -PathType Container })]
   [string]$RootDir,
   [string[]]$Include = @(),
   [string[]]$Exclude = @('**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/build/**', '**/tmp/**', '**/.turbo/**'),
-  [string[]]$Managers = @('yarn', 'npm', 'pnpm', 'bun'),  # any subset of: yarn, npm, pnpm, bun
+  [ValidateSet('yarn', 'npm', 'pnpm', 'bun')]
+  [string[]]$Managers = @('yarn', 'npm', 'pnpm', 'bun'),
   [switch]$Detailed,   # default true unless -Summary
   [switch]$Summary,
   [switch]$OnlyAffected,
@@ -94,14 +97,7 @@ if ($Help) {
   exit 0
 }
 
-if (!(Test-Path -Path $ListPath)) {
-  Write-Error "List file not found: $ListPath"
-  exit 1
-}
-if (!(Test-Path -Path $RootDir)) {
-  Write-Error "Root directory not found: $RootDir"
-  exit 1
-}
+# Path validation is now handled by ValidateScript attributes
 
 $startTime = Get-Date
 
@@ -237,7 +233,13 @@ foreach ($lock in $lockFiles) {
     }
   }
   elseif (($extName -eq 'package-lock.json') -or ($extName -eq 'npm-shrinkwrap.json')) {
-    try { $obj = Get-Content -LiteralPath $lock.FullName -Raw | ConvertFrom-Json -ErrorAction Stop } catch { $obj = $null; Write-Color ("Warning: failed to parse JSON lock: {0}" -f $lock.FullName) 'Yellow' }
+    try { 
+      $obj = Get-Content -LiteralPath $lock.FullName -Raw | ConvertFrom-Json -ErrorAction Stop 
+    }
+    catch { 
+      $obj = $null
+      if (-not $Json) { Write-Color ("Warning: failed to parse JSON lock: {0}" -f $lock.FullName) 'Yellow' }
+    }
     if ($null -ne $obj) {
       if ($obj.PSObject.Properties.Name -contains 'packages' -and $obj.packages) {
         foreach ($kv in $obj.packages.GetEnumerator()) {
@@ -343,7 +345,7 @@ foreach ($lock in $lockFiles) {
       }
     }
     catch {
-      Write-Color ("Warning: failed to parse Bun lockfile: {0}" -f $lock.FullName) 'Yellow'
+      if (-not $Json) { Write-Color ("Warning: failed to parse Bun lockfile: {0}" -f $lock.FullName) 'Yellow' }
     }
   }
 
@@ -463,9 +465,10 @@ if ($Json -or $JsonPath) {
     anyAffected = $anyAffected
     anyWarnings = $anyWarnings
     summary     = @{
-      totalLockfiles = $lockFiles.Count
-      totalPackages  = ($byLock.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
-      totalWarnings  = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsWarning } | Measure-Object).Count } | Measure-Object -Sum).Sum
+      totalLockfiles   = $lockFiles.Count
+      totalPackages    = ($byLock.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+      totalWarnings    = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsWarning } | Measure-Object).Count } | Measure-Object -Sum).Sum
+      totalCompromised = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsAffected } | Measure-Object).Count } | Measure-Object -Sum).Sum
     }
   }
   
@@ -495,8 +498,9 @@ if (-not $Json) {
   Write-Host "   Lockfiles scanned: $totalLocks" -ForegroundColor White
   Write-Host "   Package entries checked: $($totalMatches | ForEach-Object { if ($_) { $_ } else { 0 } })" -ForegroundColor White
   Write-Host "   Compromised packages: " -NoNewline -ForegroundColor White
-  if ($anyAffected) {
-    Write-Host "❌ $anyAffected" -ForegroundColor Red
+  $compromisedCount = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsAffected } | Measure-Object).Count } | Measure-Object -Sum).Sum
+  if ($compromisedCount -gt 0) {
+    Write-Host "❌ $compromisedCount" -ForegroundColor Red
   }
   else {
     Write-Host "✅ 0" -ForegroundColor Green
