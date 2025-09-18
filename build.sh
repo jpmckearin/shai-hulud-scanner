@@ -39,7 +39,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     # Build with version information
     GOOS=$OS GOARCH=$ARCH go build \
         -ldflags="-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildTime=${BUILD_TIME}" \
-        -o "bin/${BINARY_NAME}" scanner.go
+        -o "bin/${BINARY_NAME}" .
 
     # Verify the binary works
     if [[ "$OS" == "windows" ]]; then
