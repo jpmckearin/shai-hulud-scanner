@@ -25,7 +25,7 @@ pwsh -File .\scan-shai-hulud.ps1 -ListPath <String> -RootDir <String> [<CommonPa
 
 - **-Include** `<String[]>` - Glob(s) to include, relative to RootDir (e.g. src/**, apps/*). When provided, only paths matching at least one include glob are scanned. Include narrows the scan set and does not override Exclude.
 - **-Exclude** `<String[]>` - Glob(s) to exclude, relative to RootDir. Defaults: `**/node_modules/**`, `**/.pnpm-store/**`, `**/dist/**`, `**/build/**`, `**/tmp/**`, `**/.turbo/**`. Exclude is applied first and cannot be overridden by Include.
-- **-Managers** `<String[]>` - One or more of: yarn, npm, pnpm. Controls which lockfile types are scanned. Default: yarn, npm, pnpm.
+- **-Managers** `<String[]>` - One or more of: yarn, npm, pnpm, bun. Controls which lockfile types are scanned. Default: yarn, npm, pnpm, bun.
 - **-Detailed** - Show per-package lines. This is the default behavior; specifying -Detailed is a no-op unless -Summary is also present.
 - **-Summary** - Only show the list of repositories/lockfiles with matches; suppress per-package lines.
 - **-OnlyAffected** - In detailed mode, show only entries where the resolved version is AFFECTED (hide safe entries).
@@ -56,10 +56,10 @@ Shows only repositories/lockfiles that contain affected installs and hides per-p
 ### JSON output with specific managers
 
 ```powershell
-pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -Managers yarn,pnpm -Json -JsonPath .\results.json
+pwsh -File .\scan-shai-hulud.ps1 -ListPath .\exploited_packages.txt -RootDir . -Managers yarn,pnpm,bun -Json -JsonPath .\results.json
 ```
 
-Scans only yarn and pnpm lockfiles, prints JSON to stdout, and writes the same JSON to results.json.
+Scans only yarn, pnpm, and bun lockfiles, prints JSON to stdout, and writes the same JSON to results.json.
 
 ### Filtered scanning
 
@@ -128,6 +128,7 @@ jobs:
 |--------|-------------|
 | `has-matches` | Whether any compromised packages were found |
 | `match-count` | Number of compromised packages found |
+| `warning-count` | Number of packages with vulnerable versions available |
 | `json-output` | JSON output of scan results |
 
 ### Advanced Example

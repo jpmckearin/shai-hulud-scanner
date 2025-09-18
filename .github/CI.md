@@ -8,31 +8,36 @@ This repository includes GitHub Actions workflows for automated testing of the s
 
 - **Triggers**: Push and Pull Requests to `main` and `develop` branches
 - **Platform**: Ubuntu Latest
-- **PowerShell**: Version 7.4
+- **PowerShell**: Uses system default (PowerShell 7.x)
 - **Features**:
-  - Installs Pester testing framework
-  - Runs all integration tests
-  - Uploads test results as artifacts
-  - Publishes test results to GitHub
+  - Uses pre-installed Pester framework (no manual installation)
+  - Runs all integration tests via `tests/Run-Pester.ps1`
+  - Uploads test results as artifacts (30-day retention)
+  - Publishes test results summary to GitHub Step Summary
+  - Automatic TestResults directory creation
 
 ### 2. `test-matrix.yml` - Cross-Platform Testing
 
 - **Triggers**: Push and Pull Requests to `main` and `develop` branches
-- **Platforms**: Ubuntu, Windows, and macOS
-- **PowerShell**: Version 7.4
+- **Platforms**: Ubuntu, Windows, and macOS (latest versions)
+- **PowerShell**: Version 7.4 (explicitly specified in matrix)
 - **Features**:
   - Tests compatibility across all major operating systems
   - Matrix strategy for comprehensive testing
-  - Separate test result artifacts per platform
+  - Platform-specific test result artifacts (30-day retention)
+  - Individual GitHub Step Summary per platform
 
 ### 3. `quick-test.yml` - Quick Testing
 
-- **Triggers**: Manual dispatch and pushes to `main` (only when script files change)
+- **Triggers**:
+  - Manual dispatch (workflow_dispatch)
+  - Pushes to `main` branch (only when `scan-shai-hulud.ps1` or `tests/**` files change)
 - **Platform**: Ubuntu Latest
 - **Features**:
-  - Lightweight testing for quick feedback
-  - Manual trigger for on-demand testing
   - Path-based triggers to avoid unnecessary runs
+  - Manual trigger for on-demand testing
+  - Shorter artifact retention (7 days vs 30)
+  - Optimized for rapid feedback during development
 
 ## Test Configuration
 
@@ -63,8 +68,9 @@ pwsh -File tests/Run-Pester.ps1 -Tags Integration
 Test results are automatically:
 
 1. **Uploaded as artifacts** for download and inspection
-2. **Published to GitHub** for inline viewing in PRs
-3. **Retained for 30 days** in the artifacts
+2. **Published to GitHub Step Summary** with parsed test statistics
+3. **Retained for 30 days** in main workflows (7 days for quick-test)
+4. **Platform-specific artifacts** in matrix builds for cross-platform analysis
 
 ## Package Manager Support
 

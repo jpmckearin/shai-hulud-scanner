@@ -21,6 +21,7 @@ jobs:
           fetch-depth: 0 # Fetch full history for comprehensive scanning
 
       - name: Run Shai-Hulud Scanner
+        id: scan
         uses: jpmckearin/shai-hulud-scanner@main
         with:
           # Optional: Path to your custom exploited packages list file
@@ -71,11 +72,12 @@ jobs:
             // This would be populated by the scanner action
             const hasMatches = '${{ steps.scan.outputs.has-matches }}' === 'true';
             const matchCount = '${{ steps.scan.outputs.match-count }}';
+            const warningCount = '${{ steps.scan.outputs.warning-count }}';
 
             let comment = '## 🔒 Security Scan Results\n\n';
 
             if (hasMatches) {
-              comment += `⚠️ **${matchCount} compromised packages detected!**\n\n`;
+              comment += `❌ **${matchCount} compromised packages detected!**\n\n`;
               comment += 'This PR contains packages that are known to be compromised by the Shai-Hulud malware.\n';
               comment += 'Please review the scan results and update the affected dependencies.\n\n';
               comment += '**Next steps:**\n';
@@ -84,7 +86,12 @@ jobs:
               comment += '3. Re-run this scan to verify fixes\n';
             } else {
               comment += '✅ **No compromised packages detected**\n\n';
-              comment += 'All scanned dependencies appear to be safe.';
+              if (warningCount > 0) {
+                comment += `⚠️ **${warningCount} packages have vulnerable versions available** (current versions are safe)\n\n`;
+                comment += 'Consider monitoring these packages for updates and avoid upgrading to compromised versions.\n';
+              } else {
+                comment += 'All scanned dependencies appear to be safe.';
+              }
             }
 
             github.rest.issues.createComment({
