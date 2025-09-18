@@ -162,12 +162,23 @@ runs:
         Write-Host "Running shai-hulud-scanner..."
 
         try {
-          # Capture output using splatting
+          # Capture both stdout and stderr
           $output = & pwsh -File 'scan-shai-hulud.ps1' @scriptArgs 2>&1
           $exitCode = $LASTEXITCODE
 
-          # Extract JSON output (last line should be JSON)
-          $jsonOutput = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
+          # Since we always use -Json, look for JSON in the output
+          # JSON should be the last multi-line block that starts with {
+          $jsonLines = @()
+          $inJson = $false
+          foreach ($line in $output) {
+            if ($line -match '^\s*\{') {
+              $inJson = $true
+              $jsonLines = @($line)
+            } elseif ($inJson) {
+              $jsonLines += $line
+            }
+          }
+          $jsonOutput = if ($jsonLines.Count -gt 0) { $jsonLines | Out-String } else { $null }
 
           if ($jsonOutput) {
             try {
@@ -215,8 +226,14 @@ runs:
 
               # Fail if matches found and fail-on-match is true
               if ($hasMatches -and $failOnMatch) {
-                Write-Error "Compromised packages detected! Check the output above for details."
+                Write-Error "❌ Security scan failed: $matchCount compromised packages detected!"
+                Write-Error "Check the scan results above for details on affected packages."
                 exit 2
+              } else {
+                Write-Host "✅ Security scan passed: No compromised packages detected"
+                if ($warningCount -gt 0) {
+                  Write-Host "⚠️  Note: $warningCount packages have vulnerable versions available (current versions are safe)"
+                }
               }
 
             } catch {
@@ -228,6 +245,8 @@ runs:
             }
           } else {
             Write-Warning "No JSON output received from scanner"
+            Write-Host "Raw output:"
+            $output | ForEach-Object { Write-Host "  $_" }
             Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
             Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
             Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
