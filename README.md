@@ -1,4 +1,4 @@
-# Shai-Hulud Scanner
+# Shai-Hulud Scanner (Go Implementation)
 
 A cross-platform security scanner for JavaScript/TypeScript lockfiles, written in Go.
 
