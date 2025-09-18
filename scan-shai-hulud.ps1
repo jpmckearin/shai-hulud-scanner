@@ -140,7 +140,7 @@ if ($allPatterns.Count -eq 0) { $allPatterns = @('yarn.lock', 'package-lock.json
 
 $lockFiles = Get-ChildItem -Path $RootDir -Recurse -File -ErrorAction SilentlyContinue -Include $allPatterns
 if ($lockFiles.Count -eq 0) {
-  Write-Output "No lockfiles found under: $RootDir"
+  if (-not $Json) { Write-Output "No lockfiles found under: $RootDir" }
   exit 0
 }
 
@@ -165,8 +165,8 @@ function Test-PathMatchesGlobs([string]$path, [string[]]$globs) {
 }
 
 function Test-PathIncluded([string]$fullPath) {
-  $relBase = (Resolve-Path -LiteralPath $RootDir)
-  $rel = [System.IO.Path]::GetRelativePath($relBase, (Resolve-Path -LiteralPath $fullPath))
+  $relBase = (Resolve-Path -LiteralPath $RootDir).Path
+  $rel = [System.IO.Path]::GetRelativePath($relBase, (Resolve-Path -LiteralPath $fullPath).Path)
   if (Test-PathMatchesGlobs $rel $Exclude) { return $false }
   if ($Include -and $Include.Count -gt 0) {
     return (Test-PathMatchesGlobs $rel $Include)
@@ -383,12 +383,12 @@ function Get-RelativePath([string]$basePath, [string]$fullPath) {
   }
 }
 
-$_base = Resolve-Path -LiteralPath $RootDir
+$_base = (Resolve-Path -LiteralPath $RootDir).Path
 $locksWithMatches = New-Object System.Collections.Generic.List[string]
 $locksWithoutMatches = New-Object System.Collections.Generic.List[string]
 
 foreach ($lock in $lockFiles) {
-  $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
+  $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName).Path
   if ($byLock.ContainsKey($lock.FullName) -and $byLock[$lock.FullName].Count -gt 0) {
     $locksWithMatches.Add($rel)
   }
@@ -398,12 +398,12 @@ foreach ($lock in $lockFiles) {
 }
 
 # Header: compromised packages found
-if (-not $Quiet -and $anyAffected) { Write-Color "Compromised packages found (name and version match)" 'Red' }
+if (-not $Quiet -and -not $Json -and $anyAffected) { Write-Color "Compromised packages found (name and version match)" 'Red' }
 if ($locksWithMatches.Count -gt 0 -and $anyAffected) {
   foreach ($lock in $lockFiles) {
-    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
+    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName).Path
     if ($locksWithMatches -contains $rel) {
-      Write-Color (" - {0}" -f $rel) 'Red'
+      if (-not $Json) { Write-Color (" - {0}" -f $rel) 'Red' }
       if ($byLock.ContainsKey($lock.FullName)) {
         $byLock[$lock.FullName].GetEnumerator() |
         Sort-Object Key |
@@ -412,7 +412,7 @@ if ($locksWithMatches.Count -gt 0 -and $anyAffected) {
           if (-not $entry.IsAffected) { return }  # Only show actually compromised packages here
           $affectedList = ($entry.AffectedVersions -join ', ')
           $line = ("   {0} resolved {1} (AFFECTED; compromised versions: {2})" -f $entry.Package, $entry.Version, $affectedList)
-          Write-Color $line 'Red'
+          if (-not $Json) { Write-Color $line 'Red' }
         }
       }
     }
@@ -420,37 +420,37 @@ if ($locksWithMatches.Count -gt 0 -and $anyAffected) {
 }
 # Only show "None" if there are no compromised packages AND no warnings
 if (-not $anyAffected -and -not $anyWarnings) {
-  if (-not $Quiet) { Write-Color " - None" 'Red' }
+  if (-not $Quiet -and -not $Json) { Write-Color " - None" 'Red' }
 }
 
-if (-not $Quiet) { Write-Host "" }
+if (-not $Quiet -and -not $Json) { Write-Host "" }
 
 # Header: warning packages (name matches but version is safe)
-if (-not $Quiet -and $anyWarnings) { Write-Color "⚠️  Warning: Packages with compromised versions available (current versions are safe)" 'Yellow' }
+if (-not $Quiet -and -not $Json -and $anyWarnings) { Write-Color "⚠️  Warning: Packages with compromised versions available (current versions are safe)" 'Yellow' }
 if ($anyWarnings) {
   foreach ($lock in $lockFiles) {
-    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
+    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName).Path
     if ($byLock.ContainsKey($lock.FullName)) {
       $warningEntries = $byLock[$lock.FullName].GetEnumerator() | Where-Object { $_.Value.IsWarning }
       if ($warningEntries) {
-        Write-Color (" - {0}" -f $rel) 'Yellow'
+        if (-not $Json) { Write-Color (" - {0}" -f $rel) 'Yellow' }
         $warningEntries |
         Sort-Object Key |
         ForEach-Object {
           $entry = $_.Value
           $affectedList = ($entry.AffectedVersions -join ', ')
           $line = ("   {0} resolved {1} (safe; avoid versions: {2})" -f $entry.Package, $entry.Version, $affectedList)
-          Write-Color $line 'Yellow'
+          if (-not $Json) { Write-Color $line 'Yellow' }
         }
       }
     }
   }
 }
 
-if (-not $Quiet) { Write-Host "" }
+if (-not $Quiet -and -not $Json) { Write-Host "" }
 
 # Header: no compromised packages (show for files that were scanned but had no issues)
-if (-not $Quiet -and $locksWithoutMatches.Count -gt 0) {
+if (-not $Quiet -and -not $Json -and $locksWithoutMatches.Count -gt 0) {
   Write-Host "No compromised packages found (all versions are safe)"
   $locksWithoutMatches | Sort-Object | ForEach-Object { Write-Host (" - {0}" -f $_) }
 }
@@ -458,19 +458,26 @@ if (-not $Quiet -and $locksWithoutMatches.Count -gt 0) {
 # Optional JSON output
 if ($Json -or $JsonPath) {
   $jsonObj = @{
-    root        = (Resolve-Path -LiteralPath $RootDir)
+    root        = (Resolve-Path -LiteralPath $RootDir).Path
     results     = @()
     anyAffected = $anyAffected
     anyWarnings = $anyWarnings
-  }
-  foreach ($lock in $lockFiles) {
-    $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName)
-    $packages = @()
-    if ($byLock.ContainsKey($lock.FullName)) {
-      $packages = $byLock[$lock.FullName].GetEnumerator() | Sort-Object Key | ForEach-Object { $_.Value }
+    summary     = @{
+      totalLockfiles = $lockFiles.Count
+      totalPackages  = ($byLock.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+      totalWarnings  = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsWarning } | Measure-Object).Count } | Measure-Object -Sum).Sum
     }
-    $jsonObj.results += [pscustomobject]@{ lockFile = $rel; packages = $packages }
   }
+  
+  # Only include lockfiles that have actual matches
+  foreach ($lock in $lockFiles) {
+    if ($byLock.ContainsKey($lock.FullName) -and $byLock[$lock.FullName].Count -gt 0) {
+      $rel = Get-RelativePath -basePath $_base -fullPath (Resolve-Path -LiteralPath $lock.FullName).Path
+      $packages = $byLock[$lock.FullName].GetEnumerator() | Sort-Object Key | ForEach-Object { $_.Value }
+      $jsonObj.results += [pscustomobject]@{ lockFile = $rel; packages = $packages }
+    }
+  }
+  
   $jsonText = $jsonObj | ConvertTo-Json -Depth 6
   if ($Json) { Write-Output $jsonText }
   if ($JsonPath) { $jsonText | Out-File -FilePath $JsonPath -Encoding utf8 }
@@ -482,24 +489,26 @@ $totalLocks = $lockFiles.Count
 $totalMatches = ($byLock.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
 $totalWarnings = ($byLock.Values | ForEach-Object { ($_.GetEnumerator() | Where-Object { $_.Value.IsWarning } | Measure-Object).Count } | Measure-Object -Sum).Sum
 
-Write-Host ""
-Write-Host "📊 Scan Summary:" -ForegroundColor Cyan
-Write-Host "   Lockfiles scanned: $totalLocks" -ForegroundColor White
-Write-Host "   Package entries checked: $($totalMatches | ForEach-Object { if ($_) { $_ } else { 0 } })" -ForegroundColor White
-Write-Host "   Compromised packages: " -NoNewline -ForegroundColor White
-if ($anyAffected) {
-  Write-Host "❌ $anyAffected" -ForegroundColor Red
+if (-not $Json) {
+  Write-Host ""
+  Write-Host "📊 Scan Summary:" -ForegroundColor Cyan
+  Write-Host "   Lockfiles scanned: $totalLocks" -ForegroundColor White
+  Write-Host "   Package entries checked: $($totalMatches | ForEach-Object { if ($_) { $_ } else { 0 } })" -ForegroundColor White
+  Write-Host "   Compromised packages: " -NoNewline -ForegroundColor White
+  if ($anyAffected) {
+    Write-Host "❌ $anyAffected" -ForegroundColor Red
+  }
+  else {
+    Write-Host "✅ 0" -ForegroundColor Green
+  }
+  Write-Host "   Warning packages: " -NoNewline -ForegroundColor White
+  if ($totalWarnings -gt 0) {
+    Write-Host "⚠️  $totalWarnings" -ForegroundColor Yellow
+  }
+  else {
+    Write-Host "✅ 0" -ForegroundColor Green
+  }
+  Write-Host "   Scan duration: $($elapsed.ToString())" -ForegroundColor Gray
 }
-else {
-  Write-Host "✅ 0" -ForegroundColor Green
-}
-Write-Host "   Warning packages: " -NoNewline -ForegroundColor White
-if ($totalWarnings -gt 0) {
-  Write-Host "⚠️  $totalWarnings" -ForegroundColor Yellow
-}
-else {
-  Write-Host "✅ 0" -ForegroundColor Green
-}
-Write-Host "   Scan duration: $($elapsed.ToString())" -ForegroundColor Gray
 
 if ($anyAffected) { exit 2 } else { exit 0 }
