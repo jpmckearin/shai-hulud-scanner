@@ -4,41 +4,41 @@ author: "jpmckearin"
 
 inputs:
   list-path:
-    description: "Path to exploited packages list file (relative to repository root). If not provided, uses the default list from the scanner repository."
+    description: "Path to custom exploited packages list file. If not specified, uses the built-in list of known compromised packages. Example: 'security/custom-packages.txt'"
     required: false
     default: ""
   root-dir:
-    description: "Root directory to scan (relative to repository root)"
+    description: "Root directory to scan for lockfiles. Scans recursively for package-lock.json, yarn.lock, pnpm-lock.yaml, and bun.lock files. Example: './src' or '.'"
     required: false
     default: "."
   managers:
-    description: "Package managers to scan (comma-separated: yarn,npm,pnpm,bun)"
+    description: "Package managers to scan (comma-separated). Valid options: yarn, npm, pnpm, bun. Example: 'yarn,npm' to scan only Yarn and npm lockfiles."
     required: false
     default: "yarn,npm,pnpm,bun"
   include:
-    description: "Glob patterns to include (comma-separated)"
+    description: "Glob patterns to include (comma-separated). Only scan paths matching these patterns. Example: 'src/**,apps/**' to scan only src and apps directories."
     required: false
   exclude:
-    description: "Glob patterns to exclude (comma-separated)"
+    description: "Glob patterns to exclude (comma-separated). Skip paths matching these patterns. Example: '**/test/**,**/dist/**' to skip test and dist directories."
     required: false
   fail-on-match:
-    description: "Fail the action if compromised packages are found"
+    description: "Whether to fail the workflow when compromised packages are found. Set to 'false' to only warn without failing the build."
     required: false
     default: "true"
   only-affected:
-    description: "Show only affected packages in output"
+    description: "Show only compromised packages in output, hiding safe packages. Useful for focusing on actionable items only."
     required: false
     default: "false"
   summary:
-    description: "Show only summary output"
+    description: "Show only summary output without detailed package information. Useful for getting a quick overview of scan results."
     required: false
     default: "false"
   quiet:
-    description: "Suppress non-essential output"
+    description: "Suppress non-essential output including clean package listings. Only shows compromised packages and warnings."
     required: false
     default: "false"
   no-color:
-    description: "Disable colored output"
+    description: "Disable colored output. Useful when output will be processed by tools that don't handle ANSI color codes."
     required: false
     default: "false"
 
@@ -62,58 +62,6 @@ runs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Download shai-hulud-scanner and exploited packages list
-      shell: pwsh
-      run: |
-        $scannerUrl = 'https://raw.githubusercontent.com/jpmckearin/shai-hulud-scanner/main/scan-shai-hulud.ps1'
-        $scannerPath = 'scan-shai-hulud.ps1'
-        $defaultListUrl = 'https://raw.githubusercontent.com/jpmckearin/shai-hulud-scanner/main/exploited_packages.txt'
-        $defaultListPath = 'exploited_packages.txt'
-
-        Write-Host "Downloading shai-hulud-scanner..."
-        Invoke-WebRequest -Uri $scannerUrl -OutFile $scannerPath -UseBasicParsing | Out-Null
-
-        # Verify the script was downloaded
-        if (-not (Test-Path $scannerPath)) {
-          Write-Error "Failed to download shai-hulud-scanner"
-          exit 1
-        }
-
-        Write-Host "Downloading exploited packages list..."
-        Invoke-WebRequest -Uri $defaultListUrl -OutFile $defaultListPath -UseBasicParsing | Out-Null
-
-        # Verify the list was downloaded
-        if (-not (Test-Path $defaultListPath)) {
-          Write-Error "Failed to download exploited packages list"
-          exit 1
-        }
-
-    - name: Validate inputs
-      shell: pwsh
-      run: |
-        $listPath = '${{ inputs.list-path }}'
-        $rootDir = '${{ inputs.root-dir }}'
-
-        # Use default list if no custom list provided
-        if ([string]::IsNullOrEmpty($listPath)) {
-          $listPath = 'exploited_packages.txt'
-        }
-
-        # Check if list file exists
-        if (-not (Test-Path $listPath)) {
-          Write-Error "List file not found: $listPath"
-          Write-Host "Please ensure the exploited packages list file exists in your repository or use the default list"
-          exit 1
-        }
-
-        # Check if root directory exists
-        if (-not (Test-Path $rootDir)) {
-          Write-Error "Root directory not found: $rootDir"
-          exit 1
-        }
-
-        # Input validation passed
-
     - name: Run shai-hulud-scanner
       id: scan
       shell: pwsh
@@ -131,135 +79,131 @@ runs:
 
         # Use default list if no custom list provided
         if ([string]::IsNullOrEmpty($listPath)) {
-          $listPath = 'exploited_packages.txt'
+          $listPath = '${{ github.action_path }}/exploited_packages.txt'
         }
 
-        # Build command arguments using splatting - the correct approach
-        $scriptArgs = @{
-          ListPath = $listPath
-          RootDir = $rootDir
-          Json = $true
-        }
+        # Build command arguments - PowerShell script validates all inputs now
+        $args = @('-ListPath', $listPath, '-RootDir', $rootDir, '-Json')
+        
+        if ($managers) { $args += @('-Managers', ($managers -split ',' | ForEach-Object { $_.Trim() })) }
+        if ($include) { $args += @('-Include', ($include -split ',' | ForEach-Object { $_.Trim() })) }
+        if ($exclude) { $args += @('-Exclude', ($exclude -split ',' | ForEach-Object { $_.Trim() })) }
+        if ($onlyAffected) { $args += '-OnlyAffected' }
+        if ($summary) { $args += '-Summary' }  
+        if ($quiet) { $args += '-Quiet' }
+        if ($noColor) { $args += '-NoColor' }
 
-        # Only set Managers if different from default
-        if ($managers -and $managers.Trim() -and $managers -ne "yarn,npm,pnpm,bun") {
-          $scriptArgs.Managers = $managers -split ',' | ForEach-Object { $_.Trim() }
+        # Helper function to get packages by type
+        function Get-PackagesByType($results, $isAffected) {
+          $packages = @()
+          foreach ($result in $results) {
+            foreach ($package in $result.packages) {
+              if ($isAffected -and $package.IsAffected) {
+                $packages += [PSCustomObject]@{ Package = $package.Package; Version = $package.Version; File = $result.lockFile }
+              } elseif (-not $isAffected -and $package.IsWarning) {
+                $packages += [PSCustomObject]@{ Package = $package.Package; Version = $package.Version; File = $result.lockFile }
+              }
+            }
+          }
+          return $packages
         }
-
-        if ($include -and $include.Trim()) {
-          $scriptArgs.Include = $include -split ',' | ForEach-Object { $_.Trim() }
-        }
-
-        if ($exclude -and $exclude.Trim()) {
-          $scriptArgs.Exclude = $exclude -split ',' | ForEach-Object { $_.Trim() }
-        }
-
-        if ($onlyAffected) { $scriptArgs.OnlyAffected = $true }
-        if ($summary) { $scriptArgs.Summary = $true }
-        if ($quiet) { $scriptArgs.Quiet = $true }
-        if ($noColor) { $scriptArgs.NoColor = $true }
 
         Write-Host "Running shai-hulud-scanner..."
 
         try {
-          # Capture both stdout and stderr
-          $output = & pwsh -File 'scan-shai-hulud.ps1' @scriptArgs 2>&1
+          # Run the scanner and get JSON output (local file)  
+          $jsonOutput = & pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' @args
           $exitCode = $LASTEXITCODE
 
-          # Since we always use -Json, look for JSON in the output
-          # JSON should be the last multi-line block that starts with {
-          $jsonLines = @()
-          $inJson = $false
-          foreach ($line in $output) {
-            if ($line -match '^\s*\{') {
-              $inJson = $true
-              $jsonLines = @($line)
-            } elseif ($inJson) {
-              $jsonLines += $line
-            }
+          # Parse JSON with error handling
+          try {
+            $json = $jsonOutput | ConvertFrom-Json
+            $hasMatches = $json.anyAffected
+            $hasWarnings = $json.anyWarnings
+            
+            # Use summary counts for better performance
+            $matchCount = if ($json.summary) { $json.summary.totalCompromised } else { 0 }
+            $warningCount = if ($json.summary) { $json.summary.totalWarnings } else { 0 }
+          } catch {
+            Write-Error "Failed to parse JSON output: $($_.Exception.Message)"
+            Write-Error "Raw output:"
+            $jsonOutput | ForEach-Object { Write-Error "  $_" }
+            exit 1
           }
-          $jsonOutput = if ($jsonLines.Count -gt 0) { $jsonLines | Out-String } else { $null }
 
-          if ($jsonOutput) {
-            try {
-              $json = $jsonOutput | ConvertFrom-Json
-              $hasMatches = $json.anyAffected -eq $true
-              $matchCount = if ($json.results) { ($json.results | Measure-Object).Count } else { 0 }
-              $warningCount = if ($json.warnings) { ($json.warnings | Measure-Object).Count } else { 0 }
+          # Set outputs
+          Write-Output "has-matches=$hasMatches" >> $env:GITHUB_OUTPUT
+          Write-Output "match-count=$matchCount" >> $env:GITHUB_OUTPUT
+          Write-Output "warning-count=$warningCount" >> $env:GITHUB_OUTPUT
+          Write-Output "json-output=$jsonOutput" >> $env:GITHUB_OUTPUT
 
-              if ($matchCount -gt 0) {
-                Write-Host "⚠️ Found $matchCount compromised packages"
-                
-                # Add error annotations for each compromised package
-                if ($json.results) {
-                  foreach ($result in $json.results) {
-                    if ($result.affected -eq $true) {
-                      $packageInfo = "$($result.package)@$($result.version)"
-                      $file = if ($result.file) { $result.file } else { "unknown" }
-                      $line = if ($result.line) { $result.line } else { "1" }
-                      Write-Output "::error file=$file,line=$line,title=Compromised Package Found::Package $packageInfo is known to be compromised by Shai-Hulud malware"
-                    }
-                  }
-                }
-              } else {
-                Write-Host "✅ No compromised packages found"
+          # Create step summary
+          $summary = "# 🛡️ Package Security Scan Results`n`n"
+          
+          if ($hasMatches) {
+            $summary += "## ❌ Compromised Packages Found`n`n**$matchCount compromised packages detected**`n`n"
+            $compromisedPackages = Get-PackagesByType $json.results $true
+            if ($compromisedPackages) {
+              $summary += "| Package | Version | File |`n|---------|---------|------|`n"
+              foreach ($pkg in $compromisedPackages) {
+                $summary += "| ``$($pkg.Package)`` | ``$($pkg.Version)`` | ``$($pkg.File)`` |`n"
               }
-
-              # Add warning annotations for packages with vulnerable versions available
-              if ($warningCount -gt 0) {
-                Write-Host "⚠️ Found $warningCount packages with vulnerable versions available"
-                if ($json.warnings) {
-                  foreach ($warning in $json.warnings) {
-                    $packageInfo = "$($warning.package)@$($warning.version)"
-                    $file = if ($warning.file) { $warning.file } else { "unknown" }
-                    $line = if ($warning.line) { $warning.line } else { "1" }
-                    Write-Output "::warning file=$file,line=$line,title=Package with Vulnerable Version Available::Package $packageInfo has a safe version but vulnerable versions are available. Consider updating to the latest version."
-                  }
-                }
+            }
+          } elseif ($hasWarnings) {
+            $summary += "## ⚠️ Warning: Vulnerable Versions Available`n`n**$warningCount packages have vulnerable versions available (current versions are safe)**`n`n"
+            $warningPackages = Get-PackagesByType $json.results $false
+            if ($warningPackages) {
+              $summary += "| Package | Current Version | File |`n|---------|-----------------|------|`n"
+              foreach ($pkg in $warningPackages) {
+                $summary += "| ``$($pkg.Package)`` | ``$($pkg.Version)`` | ``$($pkg.File)`` |`n"
               }
-
-              # Set outputs
-              Write-Output "has-matches=$hasMatches" >> $env:GITHUB_OUTPUT
-              Write-Output "match-count=$matchCount" >> $env:GITHUB_OUTPUT
-              Write-Output "warning-count=$warningCount" >> $env:GITHUB_OUTPUT
-              Write-Output "json-output=$jsonOutput" >> $env:GITHUB_OUTPUT
-
-              # Fail if matches found and fail-on-match is true
-              if ($hasMatches -and $failOnMatch) {
-                Write-Error "❌ Security scan failed: $matchCount compromised packages detected!"
-                Write-Error "Check the scan results above for details on affected packages."
-                exit 2
-              } else {
-                Write-Host "✅ Security scan passed: No compromised packages detected"
-                if ($warningCount -gt 0) {
-                  Write-Host "⚠️  Note: $warningCount packages have vulnerable versions available (current versions are safe)"
-                }
-              }
-
-            } catch {
-              Write-Warning "Failed to parse JSON output: $($_.Exception.Message)"
-              Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
-              Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
-              Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
-              Write-Output "json-output=" >> $env:GITHUB_OUTPUT
             }
           } else {
-            Write-Warning "No JSON output received from scanner"
-            Write-Host "Raw output:"
-            $output | ForEach-Object { Write-Host "  $_" }
-            Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
-            Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
-            Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
-            Write-Output "json-output=" >> $env:GITHUB_OUTPUT
+            $summary += "## ✅ All Clear`n`nNo compromised packages found. All packages are using safe versions.`n`n"
           }
 
-          # Display the output (only if not quiet)
-          if (-not $quiet) {
-            $output | ForEach-Object { Write-Host $_ }
+          $summary += "`n## 📊 Scan Summary`n`n- **Lockfiles scanned:** $($json.summary.totalLockfiles)`n- **Package entries checked:** $($json.summary.totalPackages)`n- **Compromised packages:** $matchCount`n- **Warning packages:** $warningCount`n`n"
+
+          # Write to GitHub step summary
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          # Handle results based on JSON data
+          if ($hasMatches) {
+            $compromisedPackages = Get-PackagesByType $json.results $true
+            if ($failOnMatch) {
+              Write-Error "❌ Security scan failed: $matchCount compromised packages detected!"
+              Write-Error "Affected packages:"
+              foreach ($pkg in $compromisedPackages) {
+                Write-Error "   - $($pkg.Package)@$($pkg.Version)"
+              }
+              exit 2
+            } else {
+              Write-Host "⚠️ Security scan completed with $matchCount compromised packages detected"
+              Write-Host "Affected packages:"
+              foreach ($pkg in $compromisedPackages) {
+                Write-Host "   - $($pkg.Package)@$($pkg.Version)"
+              }
+            }
+          } elseif ($hasWarnings) {
+            Write-Host "✅ Security scan passed: No compromised packages detected"
+            Write-Host "⚠️ Note: $warningCount packages have vulnerable versions available (current versions are safe):"
+            $warningPackages = Get-PackagesByType $json.results $false
+            foreach ($pkg in $warningPackages) {
+              Write-Host "   - $($pkg.Package)@$($pkg.Version)"
+            }
+          } else {
+            Write-Host "✅ Security scan passed: No compromised packages detected"
           }
+
 
         } catch {
           Write-Error "Failed to run shai-hulud-scanner: $($_.Exception.Message)"
+          Write-Error "Command was: pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' $($args -join ' ')"
+          Write-Error "This could be due to:"
+          Write-Error "  - PowerShell execution policy restrictions"
+          Write-Error "  - Invalid input parameters"
+          Write-Error "  - File system permissions"
+          Write-Error "  - Missing or corrupted scanner script"
           Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
           Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
           Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
