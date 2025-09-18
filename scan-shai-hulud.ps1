@@ -83,7 +83,7 @@ param(
   [Parameter(Position = 3, ValueFromRemainingArguments = $false)]
   [string[]]$Exclude = @('**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/build/**', '**/tmp/**', '**/.turbo/**'),
   [Parameter(Position = 4, ValueFromRemainingArguments = $false)]
-  [string[]]$Managers = @('yarn', 'npm', 'pnpm', 'bun'),
+  [string[]]$Managers,
   [switch]$Detailed,   # default true unless -Summary
   [switch]$Summary,
   [switch]$OnlyAffected,
@@ -100,6 +100,11 @@ if ($Help) {
 }
 
 # Path validation is now handled by ValidateScript attributes
+
+# Handle Managers parameter - set default if not provided
+if (-not $Managers -or $Managers.Count -eq 0) {
+  $Managers = @('yarn', 'npm', 'pnpm', 'bun')
+}
 
 # Handle comma-separated managers string and validate
 $validManagers = @('yarn', 'npm', 'pnpm', 'bun')
