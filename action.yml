@@ -82,16 +82,19 @@ runs:
           $listPath = '${{ github.action_path }}/exploited_packages.txt'
         }
 
-        # Build command arguments - PowerShell script validates all inputs now
-        $args = @('-ListPath', $listPath, '-RootDir', $rootDir, '-Json')
-        
-        if ($managers) { $args += @('-Managers', ($managers -split ',' | ForEach-Object { $_.Trim() })) }
-        if ($include) { $args += @('-Include', ($include -split ',' | ForEach-Object { $_.Trim() })) }
-        if ($exclude) { $args += @('-Exclude', ($exclude -split ',' | ForEach-Object { $_.Trim() })) }
-        if ($onlyAffected) { $args += '-OnlyAffected' }
-        if ($summary) { $args += '-Summary' }  
-        if ($quiet) { $args += '-Quiet' }
-        if ($noColor) { $args += '-NoColor' }
+        # Build command arguments using splatting
+        $scriptArgs = @{
+          ListPath = $listPath
+          RootDir = $rootDir
+          Json = $true
+          Managers = if ($managers) { $managers -split ',' | ForEach-Object { $_.Trim() } } else { $null }
+          Include = if ($include) { $include -split ',' | ForEach-Object { $_.Trim() } } else { $null }
+          Exclude = if ($exclude) { $exclude -split ',' | ForEach-Object { $_.Trim() } } else { $null }
+          OnlyAffected = [bool]$onlyAffected
+          Summary = [bool]$summary
+          Quiet = [bool]$quiet
+          NoColor = [bool]$noColor
+        }
 
         # Helper function to get packages by type
         function Get-PackagesByType($results, $isAffected) {
@@ -111,8 +114,8 @@ runs:
         Write-Host "Running shai-hulud-scanner..."
 
         try {
-          # Run the scanner and get JSON output (local file)  
-          $jsonOutput = & pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' @args
+          # Run the scanner and get JSON output using splatting
+          $jsonOutput = & pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' @scriptArgs
           $exitCode = $LASTEXITCODE
 
           # Parse JSON with error handling
@@ -198,7 +201,7 @@ runs:
 
         } catch {
           Write-Error "Failed to run shai-hulud-scanner: $($_.Exception.Message)"
-          Write-Error "Command was: pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' $($args -join ' ')"
+          Write-Error "Command was: pwsh -File '${{ github.action_path }}/scan-shai-hulud.ps1' with splatted arguments"
           Write-Error "This could be due to:"
           Write-Error "  - PowerShell execution policy restrictions"
           Write-Error "  - Invalid input parameters"
