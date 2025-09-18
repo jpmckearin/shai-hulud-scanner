@@ -49,6 +49,9 @@ outputs:
   match-count:
     description: "Number of compromised packages found"
     value: ${{ steps.scan.outputs.match-count }}
+  warning-count:
+    description: "Number of packages with vulnerable versions available"
+    value: ${{ steps.scan.outputs.warning-count }}
   json-output:
     description: "JSON output of scan results"
     value: ${{ steps.scan.outputs.json-output }}
@@ -147,6 +150,10 @@ runs:
           $scriptArgs.Include = $include -split ',' | ForEach-Object { $_.Trim() }
         }
 
+        if ($exclude -and $exclude.Trim()) {
+          $scriptArgs.Exclude = $exclude -split ',' | ForEach-Object { $_.Trim() }
+        }
+
         if ($onlyAffected) { $scriptArgs.OnlyAffected = $true }
         if ($summary) { $scriptArgs.Summary = $true }
         if ($quiet) { $scriptArgs.Quiet = $true }
@@ -158,54 +165,85 @@ runs:
           # Capture output using splatting
           $output = & pwsh -File 'scan-shai-hulud.ps1' @scriptArgs 2>&1
           $exitCode = $LASTEXITCODE
-            
+
           # Extract JSON output (last line should be JSON)
           $jsonOutput = $output | Where-Object { $_ -match '^\{.*\}$' } | Select-Object -Last 1
-            
+
           if ($jsonOutput) {
             try {
               $json = $jsonOutput | ConvertFrom-Json
               $hasMatches = $json.anyAffected -eq $true
               $matchCount = if ($json.results) { ($json.results | Measure-Object).Count } else { 0 }
-              
+              $warningCount = if ($json.warnings) { ($json.warnings | Measure-Object).Count } else { 0 }
+
               if ($matchCount -gt 0) {
                 Write-Host "⚠️ Found $matchCount compromised packages"
+                
+                # Add error annotations for each compromised package
+                if ($json.results) {
+                  foreach ($result in $json.results) {
+                    if ($result.affected -eq $true) {
+                      $packageInfo = "$($result.package)@$($result.version)"
+                      $file = if ($result.file) { $result.file } else { "unknown" }
+                      $line = if ($result.line) { $result.line } else { "1" }
+                      Write-Output "::error file=$file,line=$line,title=Compromised Package Found::Package $packageInfo is known to be compromised by Shai-Hulud malware"
+                    }
+                  }
+                }
               } else {
                 Write-Host "✅ No compromised packages found"
               }
-              
+
+              # Add warning annotations for packages with vulnerable versions available
+              if ($warningCount -gt 0) {
+                Write-Host "⚠️ Found $warningCount packages with vulnerable versions available"
+                if ($json.warnings) {
+                  foreach ($warning in $json.warnings) {
+                    $packageInfo = "$($warning.package)@$($warning.version)"
+                    $file = if ($warning.file) { $warning.file } else { "unknown" }
+                    $line = if ($warning.line) { $warning.line } else { "1" }
+                    Write-Output "::warning file=$file,line=$line,title=Package with Vulnerable Version Available::Package $packageInfo has a safe version but vulnerable versions are available. Consider updating to the latest version."
+                  }
+                }
+              }
+
               # Set outputs
               Write-Output "has-matches=$hasMatches" >> $env:GITHUB_OUTPUT
               Write-Output "match-count=$matchCount" >> $env:GITHUB_OUTPUT
+              Write-Output "warning-count=$warningCount" >> $env:GITHUB_OUTPUT
               Write-Output "json-output=$jsonOutput" >> $env:GITHUB_OUTPUT
-              
+
               # Fail if matches found and fail-on-match is true
               if ($hasMatches -and $failOnMatch) {
                 Write-Error "Compromised packages detected! Check the output above for details."
                 exit 2
               }
+
             } catch {
               Write-Warning "Failed to parse JSON output: $($_.Exception.Message)"
               Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
               Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+              Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
               Write-Output "json-output=" >> $env:GITHUB_OUTPUT
             }
           } else {
             Write-Warning "No JSON output received from scanner"
             Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
             Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+            Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
             Write-Output "json-output=" >> $env:GITHUB_OUTPUT
           }
-          
+
           # Display the output (only if not quiet)
           if (-not $quiet) {
             $output | ForEach-Object { Write-Host $_ }
           }
-          
+
         } catch {
           Write-Error "Failed to run shai-hulud-scanner: $($_.Exception.Message)"
           Write-Output "has-matches=false" >> $env:GITHUB_OUTPUT
           Write-Output "match-count=0" >> $env:GITHUB_OUTPUT
+          Write-Output "warning-count=0" >> $env:GITHUB_OUTPUT
           Write-Output "json-output=" >> $env:GITHUB_OUTPUT
           exit 1
         }
