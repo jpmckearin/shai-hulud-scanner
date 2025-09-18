@@ -72,15 +72,17 @@ Exit codes:
 #>
 
 param(
-  [Parameter(Mandatory = $true)]
+  [Parameter(Mandatory = $true, Position = 0)]
   [ValidateScript({ Test-Path $_ -PathType Leaf })]
   [string]$ListPath,
-  [Parameter(Mandatory = $true)]
+  [Parameter(Mandatory = $true, Position = 1)]
   [ValidateScript({ Test-Path $_ -PathType Container })]
   [string]$RootDir,
+  [Parameter(Position = 2, ValueFromRemainingArguments = $false)]
   [string[]]$Include = @(),
+  [Parameter(Position = 3, ValueFromRemainingArguments = $false)]
   [string[]]$Exclude = @('**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/build/**', '**/tmp/**', '**/.turbo/**'),
-  [ValidateSet('yarn', 'npm', 'pnpm', 'bun')]
+  [Parameter(Position = 4, ValueFromRemainingArguments = $false)]
   [string[]]$Managers = @('yarn', 'npm', 'pnpm', 'bun'),
   [switch]$Detailed,   # default true unless -Summary
   [switch]$Summary,
@@ -98,6 +100,18 @@ if ($Help) {
 }
 
 # Path validation is now handled by ValidateScript attributes
+
+# Handle comma-separated managers string and validate
+$validManagers = @('yarn', 'npm', 'pnpm', 'bun')
+if ($Managers.Count -eq 1 -and ($Managers[0] -match ',')) {
+  $Managers = $Managers[0] -split ',' | ForEach-Object { $_.Trim() }
+}
+foreach ($manager in $Managers) {
+  if ($manager -notin $validManagers) {
+    Write-Error "Invalid manager '$manager'. Valid options: $($validManagers -join ', ')"
+    exit 1
+  }
+}
 
 $startTime = Get-Date
 
@@ -242,8 +256,8 @@ foreach ($lock in $lockFiles) {
     }
     if ($null -ne $obj) {
       if ($obj.PSObject.Properties.Name -contains 'packages' -and $obj.packages) {
-        foreach ($kv in $obj.packages.GetEnumerator()) {
-          $key = [string]$kv.Key
+        foreach ($kv in $obj.packages.PSObject.Properties) {
+          $key = [string]$kv.Name
           if ([string]::IsNullOrEmpty($key)) { continue }
           if ($key -match '(?:^|/)node_modules/(?<nm>.+)$') {
             $nm = $matches['nm']
